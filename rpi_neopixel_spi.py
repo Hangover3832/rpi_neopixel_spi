@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 from spidev import SpiDev
 
 
-def gamma_square(value: Union[np.array, float]) -> Union[np.array, float]:
+def gamma_square(value: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
     """
     Applies a square gamma correction to the input value.
     Parameters:
@@ -23,7 +23,7 @@ def gamma_square(value: Union[np.array, float]) -> Union[np.array, float]:
     return np.clip(value**2, 0.0, 1.0)
 
 
-def gamma_linear(value:np.array) -> np.array:
+def gamma_linear(value:np.ndarray) -> np.ndarray:
     """
     Applies a linear gamma correction (no change) to the input value.
 
@@ -36,7 +36,7 @@ def gamma_linear(value:np.array) -> np.array:
     return np.clip(value, 0.0, 1.0)
 
 
-def gamma4g(x: Union[np.array, float]) -> Union[np.array, float]:
+def gamma4g(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
     """
     4th order polynomial gamma correction function.
     Parameters:
@@ -89,6 +89,8 @@ class Rpi_NeoPixel_SPI:
     Args:
         num_pixels (int): Number of NeoPixel LEDs in the strip.
         device (int, optional): SPI device number. Defaults to 0.
+            device=0 -> /dev/spidev0.0 uses BCM pins 8 (CE0), 9 (MISO), 10 (MOSI), 11 (SCLK)
+            device=1 -> /dev/spidev0.1 uses BCM pins 7 (CE1), 9 (MISO), 10 (MOSI), 11 (SCLK)
         gamma_func (Callable, optional): Function to apply gamma correction. Defaults to gamma4g.
         hue_lerp (Callable, optional): Function to apply hue interpolation. Defaults to None.
         color_mode (str, optional): Color mode for input values. Options are "RGB", "HSV", "YIQ", "HLS". Defaults to "HSV".
@@ -101,6 +103,7 @@ class Rpi_NeoPixel_SPI:
         CLOCK_800KHZ  (3,250,000 Hz): High-speed rate for WS2812B pixels
         CLOCK_1200KHZ (6,500,000 Hz): Maximum rate for some pixels
     """
+    
     COLOR_RGB_BLACK     = np.array([0., 0., 0.])
     COLOR_RGB_BLACK_W   = np.array([0., 0., 0., 0.])
     COLOR_RGB_WHITE     = np.array([1., 1., 1.])
@@ -119,8 +122,8 @@ class Rpi_NeoPixel_SPI:
                 num_pixels: int,
                 *,
                 device: int = 0,
-                gamma_func: Callable[[NDArray[np.float64]], NDArray[np.float64]] = gamma4g,
-                hue_lerp: Callable[[float], float] | None = None,
+                gamma_func: Callable = gamma4g,
+                hue_lerp: Callable | None = None,
                 color_mode: str = "HSV", 
                 brightness: float = 1.0, 
                 auto_write: bool= False,
@@ -138,15 +141,20 @@ class Rpi_NeoPixel_SPI:
         if not self.__color_mode in Rpi_NeoPixel_SPI.COLOR_MODES:
             raise ValueError(f"Unexpected color mode: '{self.__color_mode}'")
 
-        self._spi = SpiDev()
-        self._spi.open(bus=0, device=device)
-        #self._spi.no_cs = False
-        self._spi.max_speed_hz = clock_rate
-        self._spi.mode = 0
-        self._spi.bits_per_word = 8
+        # Initialize SPI device
+        if device not in [0, 1]:
+            raise ValueError("Error: SPI device must be 0 or 1.")
+        try:
+            self._spi = SpiDev()
+            self._spi.open(bus=0, device=device)
+            self._spi.max_speed_hz = clock_rate
+            self._spi.mode = 0
+            self._spi.bits_per_word = 8
+        except:
+            raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
         self.__num_pixels = num_pixels
-        self.__brightness = brightness
+        self.__brightness = float(np.clip(brightness, 0.0, 1.0))
         self.__gamma_func = gamma_func
         self.__hue_lerp = hue_lerp
         self.__auto_write = auto_write
@@ -154,7 +162,7 @@ class Rpi_NeoPixel_SPI:
         self.__has_W: bool = len(self.__pixel_order) == 4
 
 
-    def apply_gamma(self, rgb:np.array, gamma_function: Callable, hue_lerp:Callable) -> list[int, int, int, int]:
+    def apply_gamma(self, rgb:np.ndarray, gamma_function: Callable, hue_lerp:Callable | None) -> list[int]:
         hsv = np.array(rgb_to_hsv(*rgb[0:3]))
         if hue_lerp is not None:
             hsv[0] = hue_lerp(hsv[0])
@@ -171,7 +179,7 @@ class Rpi_NeoPixel_SPI:
         return np.clip(np.round(255 * rgb_), 0, 255).astype(int).tolist()
 
 
-    def __to_RGB(self, value: np.array, color_mode=None) -> np.array:
+    def __to_RGB(self, value: np.ndarray, color_mode=None) -> np.ndarray:
         if color_mode is None:
             color_mode= self.__color_mode
 
@@ -193,7 +201,7 @@ class Rpi_NeoPixel_SPI:
             return result
 
 
-    def __to_HSV(self, value: np.array, color_mode=None) -> np.array:
+    def __to_HSV(self, value: np.ndarray, color_mode=None) -> np.ndarray:
         if color_mode is None:
             color_mode =self.__color_mode
 
@@ -208,7 +216,7 @@ class Rpi_NeoPixel_SPI:
                 return result
 
 
-    def __from_RGB(self, rgb: np.array, color_mode=None) -> np.array:
+    def __from_RGB(self, rgb: np.ndarray, color_mode=None) -> np.ndarray:
         if color_mode is None:
             color_mode =self.__color_mode
 
@@ -241,7 +249,7 @@ class Rpi_NeoPixel_SPI:
         return byte, color
 
 
-    def _write_buffer(self, buffer: np.array = None) -> None:
+    def _write_buffer(self, buffer: np.ndarray | None = None) -> None:
         """
         Write pixel data to NeoPixels using SPI protocol.
         
@@ -291,7 +299,7 @@ class Rpi_NeoPixel_SPI:
                 byte_index += 1
 
         # Send data to device
-        self._spi.writebytes2(spi_buffer)
+        self._spi.writebytes2(spi_buffer) # type: ignore
 
 
     def __setitem__(self, index: int, value: np.ndarray) -> None:
@@ -310,11 +318,11 @@ class Rpi_NeoPixel_SPI:
             self.show()
 
 
-    def __getitem__(self, index: int) -> np.array:
+    def __getitem__(self, index: int) -> np.ndarray:
         return self.__from_RGB(self.__pixel_buffer[index])
 
 
-    def fill(self, value:np.array, color_mode=None) -> None:
+    def fill(self, value:np.ndarray, color_mode=None) -> None:
         rgbw = self.__to_RGB(value)
         if self.__has_W and rgbw.shape[0] < 4:
             rgbw = np.append(rgbw, 0.0)
@@ -323,9 +331,9 @@ class Rpi_NeoPixel_SPI:
             self.show()
 
 
-    def fill_hsv(self, *, hue:float=None, sat:float=None, val:float=None, white:float=None) -> None:
+    def fill_hsv(self, *, hue:float|None=None, sat:float|None=None, val:float|None=None, white:float|None=None) -> None:
 
-        raise NotImplementedError("fill_hsv is currently not working correctly")
+        raise NotImplementedError("fill_hsv is currently not working correctly. If you like to contribute...")
 
         if hue is None and sat is None and val is None and white is None:
             return
