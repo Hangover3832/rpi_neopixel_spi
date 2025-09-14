@@ -18,10 +18,13 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
   - Configurable pixel order to match different LED types
 
 ### Color Processing
+
 - **Gamma Correction Functions**:
   - Linear (no correction)
   - Square gamma
   - 4th order polynomial (gamma4g)
+  - Custom gamma interpolation support
+
 - **Color Interpolation**:
   - 4-point linear interpolation (lerp4)
   - Custom hue interpolation support
@@ -37,5 +40,3 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - Auto-write mode
 - Context manager support for safe resource handling
 - Clean shutdown with automatic LED clearing
-
-##
