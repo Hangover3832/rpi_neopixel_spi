@@ -82,8 +82,9 @@ def hue_lerp(value):
     p4 = 1.0
     return lerp4(value, p0, p1, p2, p3, p4)
 
+a_counter = 0
 
-class Rpi_NeoPixel_SPI:
+class RpiNeoPixelSPI:
     """    
     Driver for NeoPixel LEDs using SPI interface on a Raspberry PI.
     Args:
@@ -103,7 +104,7 @@ class Rpi_NeoPixel_SPI:
         CLOCK_800KHZ  (3,250,000 Hz): High-speed rate for WS2812B pixels
         CLOCK_1200KHZ (6,500,000 Hz): Maximum rate for some pixels
     """
-    
+
     COLOR_RGB_BLACK     = np.array([0., 0., 0.])
     COLOR_RGB_BLACK_W   = np.array([0., 0., 0., 0.])
     COLOR_RGB_WHITE     = np.array([1., 1., 1.])
@@ -123,7 +124,7 @@ class Rpi_NeoPixel_SPI:
                 *,
                 device: int = 0,
                 gamma_func: Callable = gamma4g,
-                hue_lerp: Callable | None = None,
+                hue_lerp_func: Callable | None = None,
                 color_mode: str = "HSV", 
                 brightness: float = 1.0, 
                 auto_write: bool= False,
@@ -138,7 +139,7 @@ class Rpi_NeoPixel_SPI:
             raise ValueError(f"Unexpected pixel order: {self.__pixel_order}")
 
         self.__color_mode = color_mode.upper()
-        if not self.__color_mode in Rpi_NeoPixel_SPI.COLOR_MODES:
+        if not self.__color_mode in RpiNeoPixelSPI.COLOR_MODES:
             raise ValueError(f"Unexpected color mode: '{self.__color_mode}'")
 
         # Initialize SPI device
@@ -156,87 +157,73 @@ class Rpi_NeoPixel_SPI:
         self.__num_pixels = num_pixels
         self.__brightness = float(np.clip(brightness, 0.0, 1.0))
         self.__gamma_func = gamma_func
-        self.__hue_lerp = hue_lerp
+        self.__hue_lerp = hue_lerp_func
         self.__auto_write = auto_write
-        self.__pixel_buffer = np.zeros((self.__num_pixels, len(self.__pixel_order)), dtype=float)
-        self.__has_W: bool = len(self.__pixel_order) == 4
+        self.__pixel_buffer = np.zeros((self.__num_pixels, 3), dtype=float)
+        if len(self.__pixel_order) == 4:
+            self.__pixel_buffer_w = np.zeros((self.__num_pixels, 1), dtype=float)
+        else:
+            self.__pixel_buffer_w = None
 
 
-    def apply_gamma(self, rgb:np.ndarray, gamma_function: Callable, hue_lerp:Callable | None) -> list[int]:
-        hsv = np.array(rgb_to_hsv(*rgb[0:3]))
+    def apply_gamma(self, rgb:np.ndarray, w: float, gamma_function: Callable, hue_lerp:Callable | None = None) -> list[int]:
+        hsv = np.array(rgb_to_hsv(*rgb))
         if hue_lerp is not None:
             hsv[0] = hue_lerp(hsv[0])
 
-        if gamma_function is not None:
-            hsv[2] = gamma_function(hsv[2] * self.__brightness)
-            if rgb.shape[0] == 4:
-                w = gamma_function(rgb[3] * self.__brightness)
-
-        rgb_ = np.array(hsv_to_rgb(*hsv))
-        if rgb.shape[0] == 4:
-            rgb_ = np.append(rgb_, w)
-
-        return np.clip(np.round(255 * rgb_), 0, 255).astype(int).tolist()
+        hsv[2] = gamma_function(np.clip(hsv[2] * self.__brightness, 0.0, 1.0))
+        w = gamma_function(np.clip(w * self.__brightness, 0.0, 1.0))
+        rgbw = np.append(np.array(hsv_to_rgb(*hsv)), w) 
+        return np.clip(np.round(255 * rgbw), 0, 255).astype(int).tolist()
 
 
     def __to_RGB(self, value: np.ndarray, color_mode=None) -> np.ndarray:
         if color_mode is None:
             color_mode= self.__color_mode
 
+        value = value[0:3]  # Use only first three components for RGB conversion
         match color_mode.upper():
             case "HSV":
-                result = np.array(hsv_to_rgb(*value[0:3]))
+                return np.array(hsv_to_rgb(*value))
             case "YIQ":
-                result = np.array(yiq_to_rgb(*value[0:3]))
+                return np.array(yiq_to_rgb(*value))
             case "HLS":
-                result = np.array(hls_to_rgb(*value[0:3]))
+                return np.array(hls_to_rgb(*value))
             case "RGB":
                 return value
             case _:
                 raise ValueError(f"Unexpected color mode: '{color_mode}'")
-
-        if value.shape[0] == 4:
-            return np.append(result, value[3])
-        else:
-            return result
 
 
     def __to_HSV(self, value: np.ndarray, color_mode=None) -> np.ndarray:
         if color_mode is None:
             color_mode =self.__color_mode
 
+        value = value[0:3]  # Use only first three components for RGB conversion
         if color_mode.upper() == "HSV":
             return value
         else:
             value = self.__to_RGB(value, color_mode)
-            result = np.array(rgb_to_hsv(*value[0:3]))
-            if value.shape[0] == 4:
-                return np.append(result, value[3])
-            else:
-                return result
-
+            return np.array(rgb_to_hsv(*value))
+ 
 
     def __from_RGB(self, rgb: np.ndarray, color_mode=None) -> np.ndarray:
         if color_mode is None:
             color_mode =self.__color_mode
 
+        rgb = rgb[0:3]  # Use only first three components for RGB conversion
         match color_mode.upper():
             case "HSV":
-                result = np.array(rgb_to_hsv(*rgb[0:3]))
+                return np.array(rgb_to_hsv(*rgb))
             case "YIQ":
-                result = np.array(rgb_to_yiq(*rgb[0:3]))
+                return np.array(rgb_to_yiq(*rgb))
             case "HLS":
-                result = np.array(rgb_to_hls(*rgb[0:3]))
+                return np.array(rgb_to_hls(*rgb))
             case "RGB":
                 return rgb
             case _:
                 raise ValueError(f"Unexpected color mode: '{color_mode}'")
-
-        if rgb.shape[0] == 4:
-            return np.append(result, rgb[3])
-        else:
-            return result
-        
+    
 
     def __encode_color_bits(self, color: int, msb_mask: int, c_mask: int) -> tuple[int, int]:
         """Encode two color bits into one byte SPI format."""
@@ -249,7 +236,7 @@ class Rpi_NeoPixel_SPI:
         return byte, color
 
 
-    def _write_buffer(self, buffer: np.ndarray | None = None) -> None:
+    def _write_buffer(self, rgb_buffer: np.ndarray | None = None, w_buffer: np.ndarray | None = None) -> None:
         """
         Write pixel data to NeoPixels using SPI protocol.
         
@@ -257,11 +244,17 @@ class Rpi_NeoPixel_SPI:
             buffer: Optional numpy array containing pixel data. 
                    If None, uses internal pixel buffer.
         """
-        if buffer is None:
-            buffer = self.__pixel_buffer 
+        if rgb_buffer is None:
+            rgb_buffer = self.__pixel_buffer 
+        if w_buffer is None:
+            w_buffer = self.__pixel_buffer_w
+
+        # Validate buffer shape
+        if w_buffer is not None:
+            assert rgb_buffer.shape[0] == w_buffer.shape[0], "RGB and W buffers must have the same length"
 
         # Set up bit masks based on RGB/RGBW mode
-        if self.__has_W:
+        if self._has_W:
             bits_per_pixel = 16  # 4 bytes * 4 bits
             msb_mask = 0x80000000
             c_mask = 0xFFFFFFFF
@@ -271,16 +264,18 @@ class Rpi_NeoPixel_SPI:
             c_mask = 0xFFFFFF
 
         # Allocate SPI data buffer
-        spi_buffer = bytearray(bits_per_pixel * buffer.shape[0])
+        spi_buffer = bytearray(bits_per_pixel * rgb_buffer.shape[0])
         byte_index = 0
 
         # Process each pixel
-        for pixel_index in range(buffer.shape[0]):
+        for pixel_index in range(rgb_buffer.shape[0]):
             # Apply gamma correction and get color values
-            if self.__has_W:
-                r, g, b, w = self.apply_gamma(buffer[pixel_index], self.__gamma_func, self.__hue_lerp)
+            if self._has_W:
+                _w = w_buffer[pixel_index] # type: ignore
             else:
-                r, g, b = self.apply_gamma(buffer[pixel_index], self.__gamma_func, self.__hue_lerp)
+                _w = 0.0
+
+            r, g, b, w = self.apply_gamma(rgb_buffer[pixel_index], _w, self.__gamma_func, self.__hue_lerp)
 
             # Combine color channels according to pixel order
             color = 0
@@ -303,30 +298,29 @@ class Rpi_NeoPixel_SPI:
 
 
     def __setitem__(self, index: int, value: np.ndarray) -> None:
-        if not isinstance(index, int):
-            raise TypeError("Index must be an integer")
-        if index < 0 or index >= self.__num_pixels:
-            raise IndexError("Pixel index out of range")
-        if not isinstance(value, np.ndarray):
-            raise TypeError("Value must be a numpy array")
-        
-        rgbw = self.__to_RGB(np.clip(value, 0.0, 1.0))
-        if self.__has_W and rgbw.shape[0] < 4:
-            rgbw = np.append(rgbw, 0.0)
-        self.__pixel_buffer[index] = rgbw
+        rgb = self.__to_RGB(np.clip(value, 0.0, 1.0))
+
+        if value.shape[0] > 3 and self._has_W:
+            self.__pixel_buffer_w[index] = float(np.clip(value[3], 0.0, 1.0)) # type: ignore
+
+        self.__pixel_buffer[index] = rgb
         if self.__auto_write:
             self.show()
 
 
     def __getitem__(self, index: int) -> np.ndarray:
-        return self.__from_RGB(self.__pixel_buffer[index])
+        result = self.__from_RGB(self.__pixel_buffer[index])
+        if self._has_W:
+            result = np.append(result, self.__pixel_buffer_w[index]) # type: ignore
+        return result
 
 
     def fill(self, value:np.ndarray, color_mode=None) -> None:
-        rgbw = self.__to_RGB(value)
-        if self.__has_W and rgbw.shape[0] < 4:
-            rgbw = np.append(rgbw, 0.0)
-        self.__pixel_buffer [:] = rgbw
+        rgb = self.__to_RGB(value)
+        self.__pixel_buffer [:] = rgb
+        if self._has_W and value.shape[0] > 3:
+            self.__pixel_buffer_w[:] = np.clip(value[3], 0.0, 1.0) # type: ignore
+        
         if self.__auto_write:
             self.show()
 
@@ -347,7 +341,7 @@ class Rpi_NeoPixel_SPI:
             if val is not None:
                 hsv[2] = val
             rgb = self.__to_RGB(hsv, color_mode="HSV")
-            if white is not None and self.__has_W:
+            if white is not None and self._has_W:
                 rgb[3] = white
             self.__pixel_buffer[i] = rgb
 
@@ -358,11 +352,8 @@ class Rpi_NeoPixel_SPI:
 
     def clear(self) -> None:
         """Clear all pixels by setting them to black."""
-        black = self.COLOR_RGB_BLACK_W if self.__has_W else self.COLOR_RGB_BLACK
+        black = self.COLOR_RGB_BLACK_W if self._has_W else self.COLOR_RGB_BLACK
         self.fill(black)
-        if self.__auto_write:
-            self.show()
-
 
     def show(self) -> None:
         self._write_buffer()
@@ -374,23 +365,29 @@ class Rpi_NeoPixel_SPI:
             case 0:
                 pass
             case 1: # clear pixel at index
-                if self.__has_W:
-                    self[args[0]] = Rpi_NeoPixel_SPI.COLOR_RGB_BLACK_W
+                if self._has_W:
+                    self[args[0]] = RpiNeoPixelSPI.COLOR_RGB_BLACK_W
                 else:
-                    self[args[0]] = Rpi_NeoPixel_SPI.COLOR_RGB_BLACK
+                    self[args[0]] = RpiNeoPixelSPI.COLOR_RGB_BLACK
             case 2: # set pixel at index
                 self[args[0]] = args[1]
             case _:
                 raise ValueError("Too many arguments!")
-        self.show()
+            
+        if not self.__auto_write:
+            self.show()
 
 
     def set_value(self, index:int, a:float, b:float, c:float, w:float=0.) -> None:
-        if self.__has_W:
+        if self._has_W:
             self[index] = np.array([a, b, c, w])
         else:
             self[index] = np.array([a, b, c])
 
+
+    @property
+    def _has_W(self) -> bool:
+        return self.__pixel_buffer_w is not None
 
     @property
     def gamma(self):
@@ -409,7 +406,7 @@ class Rpi_NeoPixel_SPI:
 
     @color_mode.setter
     def color_mode(self, new_mode: str) -> None:
-        if new_mode in Rpi_NeoPixel_SPI.COLOR_MODES:
+        if new_mode in RpiNeoPixelSPI.COLOR_MODES:
             self.__color_mode = new_mode
         else:
             raise ValueError(f"Error: Unknown color mode: '{new_mode}'")
@@ -427,7 +424,7 @@ class Rpi_NeoPixel_SPI:
 
 
     @property
-    def auto_write(self) -> float:
+    def auto_write(self) -> bool:
         return self.__auto_write
 
     @auto_write.setter
@@ -458,7 +455,7 @@ class Rpi_NeoPixel_SPI:
             finally:
                 self._spi = None
 
-    def __enter__(self) -> 'Rpi_NeoPixel_SPI':
+    def __enter__(self) -> 'RpiNeoPixelSPI':
         """Context manager entry"""
         return self
 
@@ -475,16 +472,19 @@ def Test():
     from time import sleep
     from random import randrange
 
-    with Rpi_NeoPixel_SPI(8, device=1, brightness=0.5, color_mode="HSV") as neo:
+    with RpiNeoPixelSPI(144, device=0, brightness=0.5, color_mode="RGB", pixel_order="GRB", gamma_func=gamma4g) as neo:
         while True:
             for i in range(neo.num_pixels):
-                neo.set_value(i, randrange(0, 100)/100, 1.0, 1.0)
-                neo.show()
-                sleep(0.1)
-            sleep(1)
+                color = np.array([0, 0, i/(neo.num_pixels-1), 0, 0])
+                neo(i, color)
+                #neo.show()
+                # sleep(0.1)
+            while True:
+                sleep(0.5)
             neo.clear()
             neo.show()
-            sleep(1)
+            sleep(0.5)
+
 
 if __name__ == "__main__":
     Test()
