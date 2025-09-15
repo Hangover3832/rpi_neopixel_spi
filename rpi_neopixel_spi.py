@@ -2,7 +2,7 @@
 Raspberry Pi NeoPixel driver using SPI interface.
 Author: AlexL
 License: MIT
-Github:
+Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
 import numpy as np
