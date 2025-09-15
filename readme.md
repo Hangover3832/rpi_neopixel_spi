@@ -2,6 +2,8 @@
 
 This Python library provides an optimized SPI driver for controlling WS2812/SK6812 and 13 (NeoPixel) LED strips. It features efficient bit encoding that allows controlling up to 320 LEDs in a single SPI buffer transmission.
 
+**In developement and not yet fully testet**
+
 ## Key Features
 
 ### Color Handling
@@ -24,10 +26,6 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
   - Square gamma
   - 4th order polynomial (gamma4g)
   - Custom gamma interpolation support
-
-- **Color Interpolation**:
-  - 4-point linear interpolation (lerp4)
-  - Custom hue interpolation support
 
 ### Performance
 - Optimized SPI buffer encoding
