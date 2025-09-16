@@ -410,14 +410,17 @@ def Test():
     from time import sleep
     from random import randrange, random
 
-    with RpiNeoPixelSPI(144, device=0, brightness=0.25, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
+    with RpiNeoPixelSPI(8, device=1) as neo:
+        pass
+
+    with RpiNeoPixelSPI(144, device=0, brightness=0.1, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
         while True:
             for i in range(neo.num_pixels):
                 v = i/(neo.num_pixels-1)
                 print(v)
                 color = np.array([v,1,1])
                 neo(i, color)
-                #sleep(0.05)
+                sleep(0.05)
             sleep(0.25)
             neo.clear()
             neo()
