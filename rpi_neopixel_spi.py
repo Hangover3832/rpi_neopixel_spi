@@ -5,11 +5,13 @@ License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
+from dataclasses import dataclass
 import numpy as np
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Union, Callable
 from numpy.typing import NDArray
 from spidev import SpiDev
+from threading import Lock
 
 
 def gamma_square(value: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
@@ -62,7 +64,6 @@ class RpiNeoPixelSPI:
             device=0 -> /dev/spidev0.0 uses BCM pins 8 (CE0), 9 (MISO), 10 (MOSI), 11 (SCLK)
             device=1 -> /dev/spidev0.1 uses BCM pins 7 (CE1), 9 (MISO), 10 (MOSI), 11 (SCLK)
         gamma_func (Callable, optional): Function to apply gamma correction. Defaults to gamma4g.
-        hue_lerp (Callable, optional): Function to apply hue interpolation. Defaults to None.
         color_mode (str, optional): Color mode for input values. Options are "RGB", "HSV", "YIQ", "HLS". Defaults to "HSV".
         brightness (float, optional): Brightness level (0.0 to 1.0). Defaults to 1.0.
         auto_write (bool, optional): If True, updates the LEDs automatically on value change. Defaults to False.
@@ -83,10 +84,11 @@ class RpiNeoPixelSPI:
     CLOCK_800KHZ        = 3_250_000
     CLOCK_1200KHZ       = 6_500_000
     # Add constants for SPI encoding
-    SPI_HIGH_BIT = 0xC0
-    SPI_LOW_BIT = 0x80
-    SPI_HIGH_BIT2 = 0x0C
-    SPI_LOW_BIT2 = 0x08
+    SPI_HIGH_BIT        = 0xC0
+    SPI_LOW_BIT         = 0x80
+    SPI_HIGH_BIT2       = 0x0C
+    SPI_LOW_BIT2        = 0x08
+
 
     def __init__(self,
                 num_pixels: int,
@@ -131,12 +133,21 @@ class RpiNeoPixelSPI:
         self.__auto_write = auto_write
         self.__pixel_buffer = np.zeros((self.__num_pixels, len(self.__pixel_order)), dtype=float)
 
+         
+        if len(self.__pixel_order) == 4:
+            self.bits_per_pixel = 16
+            self.__msb_mask = 0x80000000
+            self.__c_mask = 0xFFFFFFFF
+        else:
+            self.bits_per_pixel = 12
+            self.__msb_mask = 0x800000
+            self.__c_mask = 0xFFFFFF
+
         # Pre-allocate buffer
-        self.bits_per_pixel = 16 if len(self.__pixel_order) == 4 else 12
         self.__spi_buffer = np.zeros([self.bits_per_pixel, self.num_pixels], dtype=np.uint8)
 
 
-    def __to_RGB(self, value: np.ndarray, color_mode=None) -> np.ndarray:
+    def __to_RGB(self, value: np.ndarray, color_mode: str | None = None) -> np.ndarray:
         if color_mode is None:
             color_mode= self.__color_mode
 
@@ -158,7 +169,7 @@ class RpiNeoPixelSPI:
             return result
 
 
-    def __to_HSV(self, value: np.ndarray, color_mode=None) -> np.ndarray:
+    def __to_HSV(self, value: np.ndarray, color_mode: str | None ) -> np.ndarray:
         if color_mode is None:
             color_mode = self.__color_mode
 
@@ -174,7 +185,7 @@ class RpiNeoPixelSPI:
                 return hsv
  
 
-    def __from_RGB(self, rgb: np.ndarray, color_mode=None) -> np.ndarray:
+    def __from_RGB(self, rgb: np.ndarray, color_mode: str | None = None) -> np.ndarray:
         if color_mode is None:
             color_mode =self.__color_mode
 
@@ -194,7 +205,7 @@ class RpiNeoPixelSPI:
             return np.append(result, rgb[3])
         else: 
             return result
-
+        
 
     def _write_buffer(self, rgb_buffer: np.ndarray | None = None) -> None: # type: ignore
         """
@@ -207,14 +218,6 @@ class RpiNeoPixelSPI:
         if rgb_buffer is None:
             rgb_buffer: np.ndarray = self.__pixel_buffer.copy()
 
-         # Set up bit masks based on RGB/RGBW mode
-        if self._has_W:
-            msb_mask = 0x80000000
-            c_mask = 0xFFFFFFFF
-        else:
-            msb_mask = 0x800000
-            c_mask = 0xFFFFFF
-
         # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8
         rgb_buffer = np.clip(np.round(self.__gamma_func(rgb_buffer * self.__brightness) * 255), 0, 255).astype(np.uint8)
 
@@ -222,25 +225,30 @@ class RpiNeoPixelSPI:
         # lets rearange the rgb_buffer to the correct pixel order. 
         # Here, we allow every possible pixel order with R,G,B and optional W
         rgb_buffer = rgb_buffer[:, [self.__pixel_order.index(c) for c in 'RGBW' if c in self.__pixel_order]]
+
         if self._has_W:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00_00, 0x1_00_00, 0x1_00, 1], dtype=np.uint32)
         else:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00, 0x1_00, 1], dtype=np.uint32)
 
+        # Convert [r, g, b] uint8 to a single uint32
         rgb_buffer = np.bitwise_or.reduce(rgb_buffer, axis=1, dtype=np.uint32)
+
+        # shift out 2 bits of each pixel and encode to a byte for SPI transmission 
         for i in range(self.bits_per_pixel):
-            bit1 = (rgb_buffer & msb_mask).astype(bool)
-            rgb_buffer = ((rgb_buffer << 1) & c_mask).astype(np.uint32)
-            bit2 = (rgb_buffer & msb_mask).astype(bool)
-            rgb_buffer = ((rgb_buffer << 1) & c_mask).astype(np.uint32)
+            bit1 = (rgb_buffer & self.__msb_mask).astype(bool)
+            rgb_buffer = ((rgb_buffer << 1) & self.__c_mask).astype(np.uint32)
+            bit2 = (rgb_buffer & self.__msb_mask).astype(bool) 
+            rgb_buffer = ((rgb_buffer << 1) & self.__c_mask).astype(np.uint32)
+            # encode 2 pixel bits into 1 SPI byte
             self.__spi_buffer[i] = (np.where(bit1, self.SPI_HIGH_BIT, self.SPI_LOW_BIT) | np.where(bit2, self.SPI_HIGH_BIT2, self.SPI_LOW_BIT2)).astype(np.uint8)
 
         # Send data to device
         self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
 
 
-    def __setitem__(self, index: int, value: np.ndarray) -> None:
-        rgb = self.__to_RGB(np.clip(value, 0.0, 1.0))
+    def __setitem__(self, index: int, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
+        rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
 
         if rgb.shape[0] == 3 and self._has_W:
             # rgb = np.append(rgb, self.__pixel_buffer[index][3])
@@ -252,12 +260,19 @@ class RpiNeoPixelSPI:
             self.show()
 
 
+    def set_value(self, index: int, *values, color_mode: str | None = None) -> None:
+        if isinstance(values[0], (list, np.ndarray, tuple)):
+            self.__setitem__(index, *values, color_mode=color_mode)
+        else:
+            self.__setitem__(index, values, color_mode=color_mode)
+
+
     def __getitem__(self, index: int) -> np.ndarray:
         return self.__from_RGB(self.__pixel_buffer[index])
 
 
-    def fill(self, value:np.ndarray, color_mode=None) -> None:
-        rgb = self.__to_RGB(value)
+    def fill(self, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
+        rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
         self.__pixel_buffer [:] = rgb
         if self.__auto_write:
             self.show()
@@ -290,7 +305,7 @@ class RpiNeoPixelSPI:
     def clear(self) -> None:
         """Clear all pixels by setting them to black."""
         black = self.COLOR_RGB_BLACK_W if self._has_W else self.COLOR_RGB_BLACK
-        self.fill(black)
+        self.fill(black, color_mode="RGB")
 
 
     def show(self) -> None:
@@ -316,16 +331,10 @@ class RpiNeoPixelSPI:
             self.show()
 
 
-    def set_value(self, index:int, a:float, b:float, c:float, w:float=0.) -> None:
-        if self._has_W:
-            self[index] = np.array([a, b, c, w])
-        else:
-            self[index] = np.array([a, b, c])
-
-
     @property
     def _has_W(self) -> bool:
         return self.__pixel_buffer.shape[1] > 3
+
 
     @property
     def gamma(self):
@@ -406,29 +415,32 @@ class RpiNeoPixelSPI:
         self.cleanup()
 
 
-def Test():
+def Demo():
     from time import sleep
     from random import randrange, random
 
-    with RpiNeoPixelSPI(8, device=1) as neo:
-        pass
 
-    with RpiNeoPixelSPI(144, device=0, brightness=0.1, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
-        while True:
-            for i in range(neo.num_pixels):
-                v = i/(neo.num_pixels-1)
-                print(v)
-                color = np.array([v,1,1])
-                neo(i, color)
-                sleep(0.05)
-            sleep(0.25)
-            neo.clear()
-            neo()
-            sleep(0.5)
+    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
+        with RpiNeoPixelSPI(8, device=1, color_mode="RGB", brightness=1) as neo1:
+            neo1.set_value(0, 0.75, 1, 1, color_mode="HSV")
+            neo1.set_value(1, [1, 0, 0])
+            neo1.set_value(2, np.array([0, 1, 0]))
+            neo1[3] = [0, 0, 1]
+            neo1[4] = (1, 1, 0,)
+            neo1[5] = np.array([1, 0, 1])
+            neo1[6] = 0, 1, 1
+            neo1[7] = 1, 1, 1
+            neo1() # = neo.show()
 
-
-
+            while True:
+                for i in range(neo.num_pixels):
+                    v = i/(neo.num_pixels-1)
+                    color = v, 1, 1
+                    neo(i, color) # immediate show() on this
+                    #sleep(0.05)
+                neo.clear()
+                sleep(0.5)
 
 
 if __name__ == "__main__":
-    Test()
+    Demo()
