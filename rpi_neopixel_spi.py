@@ -80,6 +80,7 @@ class RpiNeoPixelSPI:
     COLOR_RGB_WHITE     = np.array([1., 1., 1.])
     COLOR_RGB_WHITE_W   = np.array([0., 0., 0., 1.])
     COLOR_MODES         = ["RGB", "HSV", "YIQ", "HLS"]
+    PIXEL_ORDERS        = ["RGB", "RGBW", "GRB", "GRBW"]
     CLOCK_400KHZ        = 1_625_000
     CLOCK_800KHZ        = 3_250_000
     CLOCK_1200KHZ       = 6_500_000
@@ -103,7 +104,7 @@ class RpiNeoPixelSPI:
                 ) -> None:
 
         self.__pixel_order = pixel_order.upper()
-        if self.__pixel_order[0:3] == "RGB" or self.__pixel_order[0:3] == "GRB":
+        if self.__pixel_order in self.PIXEL_ORDERS:
             pass
         else:
             raise ValueError(f"Unexpected pixel order: {self.__pixel_order}")
@@ -148,6 +149,7 @@ class RpiNeoPixelSPI:
 
 
     def __to_RGB(self, value: np.ndarray, color_mode: str | None = None) -> np.ndarray:
+        """Convert value from color_mode (or, if not provided, the current color mode) to RGB"""
         if color_mode is None:
             color_mode= self.__color_mode
 
@@ -170,6 +172,7 @@ class RpiNeoPixelSPI:
 
 
     def __to_HSV(self, value: np.ndarray, color_mode: str | None ) -> np.ndarray:
+        """Convert value from color_mode (or, if not provided, the current color mode) to HSV"""
         if color_mode is None:
             color_mode = self.__color_mode
 
@@ -186,6 +189,7 @@ class RpiNeoPixelSPI:
  
 
     def __from_RGB(self, rgb: np.ndarray, color_mode: str | None = None) -> np.ndarray:
+        """Convert value from RGB to color_mode (or, if not provided, to the current color mode)"""
         if color_mode is None:
             color_mode =self.__color_mode
 
@@ -222,16 +226,15 @@ class RpiNeoPixelSPI:
         rgb_buffer = np.clip(np.round(self.__gamma_func(rgb_buffer * self.__brightness) * 255), 0, 255).astype(np.uint8)
 
         # rows are now pixels, columns are R,G,B,(W)
-        # lets rearange the rgb_buffer to the correct pixel order. 
+        # lets rearange the rgb_buffer to the correct pixel order
         # Here, we allow every possible pixel order with R,G,B and optional W
         rgb_buffer = rgb_buffer[:, [self.__pixel_order.index(c) for c in 'RGBW' if c in self.__pixel_order]]
 
+        # Convert [r, g, b, (w)] uint8 to a single uint32:
         if self._has_W:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00_00, 0x1_00_00, 0x1_00, 1], dtype=np.uint32)
         else:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00, 0x1_00, 1], dtype=np.uint32)
-
-        # Convert [r, g, b] uint8 to a single uint32
         rgb_buffer = np.bitwise_or.reduce(rgb_buffer, axis=1, dtype=np.uint32)
 
         # shift out 2 bits of each pixel and encode to a byte for SPI transmission 
@@ -274,30 +277,6 @@ class RpiNeoPixelSPI:
     def fill(self, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
         rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
         self.__pixel_buffer [:] = rgb
-        if self.__auto_write:
-            self.show()
-
-
-    def fill_hsv(self, *, hue:float|None=None, sat:float|None=None, val:float|None=None, white:float|None=None) -> None:
-
-        raise NotImplementedError("fill_hsv is currently not working correctly. If you like to contribute...")
-
-        if hue is None and sat is None and val is None and white is None:
-            return
-        
-        for i in range(self.num_pixels):
-            hsv = self.__to_HSV(self.__pixel_buffer[i])
-            if hue is not None:
-                hsv[0] = hue
-            if sat is not None:
-                hsv[1] = sat
-            if val is not None:
-                hsv[2] = val
-            rgb = self.__to_RGB(hsv, color_mode="HSV")
-            if white is not None and self._has_W:
-                rgb[3] = white
-            self.__pixel_buffer[i] = rgb
-
         if self.__auto_write:
             self.show()
 

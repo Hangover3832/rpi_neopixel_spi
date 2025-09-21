@@ -40,7 +40,7 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - Clean shutdown with automatic LED clearing
 
 ### If 320 pixels aren't enough
-This driver handles larges sizes automatically. If you want more than 320 pixels, the SP driver nedds to switch the buffer, which may result in glitches now and then. If this an issue, you can increase the SPI buffer size in the file /boot/firmware/cmdline.txt by adding spidev.bufsiz=<NEEDED BUFFER SIZE>.
+This driver handles larges sizes automatically. If you want more than 320 pixels, the SP driver nedds to switch the buffer, which may result in glitches now and then. If this is an issue, you can increase the SPI buffer size in the file /boot/firmware/cmdline.txt by adding spidev.bufsiz=<NEEDED BUFFER SIZE>.
 
 ### Bit encoding measurement
 ![alt text](crt_print.png)
