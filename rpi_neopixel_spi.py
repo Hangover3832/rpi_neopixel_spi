@@ -263,11 +263,15 @@ class RpiNeoPixelSPI:
             self.show()
 
 
-    def set_value(self, index: int, *values, color_mode: str | None = None) -> None:
-        if isinstance(values[0], (list, np.ndarray, tuple)):
-            self.__setitem__(index, *values, color_mode=color_mode)
-        else:
-            self.__setitem__(index, values, color_mode=color_mode)
+    def set_value(self, index: int | list[int], *values, color_mode: str | None = None) -> None:
+        if isinstance(index, int):
+            index = [index]
+
+        for i in index:
+            if isinstance(values[0], (list, np.ndarray, tuple)):
+                self.__setitem__(i, values[0], color_mode=color_mode)
+            else:
+                self.__setitem__(i, values, color_mode=color_mode)
 
 
     def __getitem__(self, index: int) -> np.ndarray:
@@ -301,8 +305,12 @@ class RpiNeoPixelSPI:
                     self[args[0]] = RpiNeoPixelSPI.COLOR_RGB_BLACK_W
                 else:
                     self[args[0]] = RpiNeoPixelSPI.COLOR_RGB_BLACK
-            case 2: # set pixel at index
-                self[args[0]] = args[1]
+            case 2: # set pixel at index(es)
+                if isinstance(args[0], (list, tuple)):
+                    for i in args[0]:
+                        self[i] = args[1] 
+                else:
+                    self[args[0]] = args[1]
             case _:
                 raise ValueError("Too many arguments!")
             
@@ -373,8 +381,6 @@ class RpiNeoPixelSPI:
         """
         if hasattr(self, '_spi') and self._spi is not None:
             try:
-                self.clear()  # Turn off all pixels
-                self.show()
                 self._spi.close()
             except Exception as e:
                 print(f"Warning: Error during cleanup: {e}")
@@ -399,8 +405,8 @@ def Demo():
     from random import randrange, random
 
 
-    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
-        with RpiNeoPixelSPI(8, device=1, color_mode="RGB", brightness=1) as neo1:
+    with RpiNeoPixelSPI(144, device=0, brightness=0.5, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
+        with RpiNeoPixelSPI(8, device=1, color_mode="RGB", brightness=0.5) as neo1:
             neo1.set_value(0, 0.75, 1, 1, color_mode="HSV")
             neo1.set_value(1, [1, 0, 0])
             neo1.set_value(2, np.array([0, 1, 0]))
@@ -410,15 +416,12 @@ def Demo():
             neo1[6] = 0, 1, 1
             neo1[7] = 1, 1, 1
             neo1() # = neo.show()
-
-            while True:
-                for i in range(neo.num_pixels):
-                    v = i/(neo.num_pixels-1)
-                    color = v, 1, 1
-                    neo(i, color) # immediate show() on this
-                    #sleep(0.05)
-                neo.clear()
-                sleep(0.5)
+            for i in range(neo.num_pixels):
+                v = i/(neo.num_pixels-1)
+                color = v, 1, 1
+                neo(i, color) # immediate show() on this
+            neo.set_value([23, 96, 120], [0, 0, 1], color_mode="RGB")
+            sleep(1)
 
 
 if __name__ == "__main__":
