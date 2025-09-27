@@ -5,7 +5,6 @@ License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
-from dataclasses import dataclass
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
@@ -52,7 +51,7 @@ def gamma_linear(value:np.ndarray) -> np.ndarray:
 def poly4Fit(value_in: Union[np.ndarray, float], values_out: np.ndarray) -> Union[np.ndarray, float]:
     """apply a 4th degree polynomial fit"""
     vIn = np.array([0., 0.25, 0.5, 0.75, 1.0])
-    poly = Poly.fit(vIn, values_out, deg=4)
+    poly = Poly.fit(vIn, values_out, deg=4, domain=(0.0, 1.0), window=(0.0, 1.0))
     return poly(value_in)
 
 
