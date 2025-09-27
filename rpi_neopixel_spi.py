@@ -22,7 +22,7 @@ def gamma_square(value: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
     Returns:
         np.array or float: The gamma-corrected array or float value.
     """
-    return np.clip(value**2, 0.0, 1.0)
+    return np.clip(np.square(value), 0.0, 1.0)
 
 
 def gamma_linear(value:np.ndarray) -> np.ndarray:
@@ -52,7 +52,8 @@ def gamma4g(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
     a = -16*d/3 + 128*p1/3 - 128*p2/9 + 16/3
     b = 32*d/3 - 224*p1/3 + 160*p2/9 - 16/3
     c = -19*d/3 + 32*p1 - 32*p2/9 + 1
-    return a * x**4 + b * x**3 + c * x**2 + d * x
+    e = 0.
+    return np.polynomial.Polynomial((e, d, c, b, a), domain=(0., 1.), window=(0., 1.))(x)
 
 
 class RpiNeoPixelSPI:
@@ -418,7 +419,7 @@ def Demo():
             neo1() # = neo.show()
             for i in range(neo.num_pixels):
                 v = i/(neo.num_pixels-1)
-                color = v, 1, 1
+                color = 1, 0, v
                 neo(i, color) # immediate show() on this
             neo.set_value([23, 96, 120], [0, 0, 1], color_mode="RGB")
             sleep(1)
