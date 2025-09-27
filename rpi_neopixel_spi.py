@@ -18,49 +18,45 @@ CUSTOM_GAMMA = np.array([
     0.50,   # value for 50% brightness
     0.75,   # value for 75% brightness
     1.0     # value for 100% brightness
-])
+]) # insert more more values in between if desired
+
+SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
+"""This is quite close to the square gamma where the middle grey is 25%"""
+
+DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% middle grey + my own magic
+""" 
+Note that Icreated this masterpiece of gamma based on the 18% middle grey principle
+(Munsell, Sloan & Godlove, see https://en.wikipedia.org/wiki/Middle_gray) and just by my own subjective
+perception of brightness on a particular neopixel stripe.
+"""
+
+SRGB_GAMMA = np.array([0.0, 0.15, 0.214, 0.37, 1.0])
+# like default gamma but shifted towards sRGB
+
+NO_DARK_GAMMA = np.array([0.03, 0.5, 1.0])
+# no more dark pixels :-()
+
+CRAZY_GAMMA = np.array([1.0, 0.0, 1.0]) 
+# dark pixels are bright, bright pixels are bright and middle pixels are dark ;-)
 
 
-DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% for half the brightness
-
-
-def gamma_square(value: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
-    """
-    Applies a square gamma correction to the input value.
-    Parameters:
-        value (np.array or float): The input array of color values or a single float value.
-    Returns:
-        np.array or float: The gamma-corrected array or float value.
-    """
-    return np.clip(np.square(value), 0.0, 1.0)
-
-
-def gamma_linear(value:np.ndarray) -> np.ndarray:
-    """
-    Applies a linear gamma correction (no change) to the input value.
-
-    Parameters:
-        value (np.array): The input array of color values.
-
-    Returns:
-        np.array: The same input array, unchanged.
-    """
-    return np.clip(value, 0.0, 1.0)
-
-
-def poly4Fit(value_in: Union[np.ndarray, float], values_out: np.ndarray) -> Union[np.ndarray, float]:
-    """apply a 4th degree polynomial fit"""
-    vIn = np.array([0., 0.25, 0.5, 0.75, 1.0])
-    poly = Poly.fit(vIn, values_out, deg=4, domain=(0.0, 1.0), window=(0.0, 1.0))
+def PolyFit(value_in: Union[np.ndarray, float], values_out: np.ndarray) -> Union[np.ndarray, float]:
+    """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points"""
+    n = len(values_out)
+    vIn = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
+    poly = Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
     return poly(value_in)
 
 
-def CustomGamma(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
-    return poly4Fit(x, CUSTOM_GAMMA)
-
-
-def default_gamma(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
-    return poly4Fit(x, DEFAULT_GAMMA)
+custom_gamma = lambda x: PolyFit(x, CUSTOM_GAMMA)
+default_gamma = lambda x: PolyFit(x, DEFAULT_GAMMA)
+srgb_gamma = lambda x: PolyFit(x, SRGB_GAMMA)
+simple_gamma = lambda x: PolyFit(x, SIMPLE_GAMMA)
+no_dark_gamma = lambda x: PolyFit(x, NO_DARK_GAMMA)
+crazy_gamma = lambda x: PolyFit(x, CRAZY_GAMMA)
+square_gamma = lambda x: np.square(x)
+linear_gamma = lambda x: x
+inverse_gamma = lambda x: PolyFit(x, DEFAULT_GAMMA[::-1])
 
 
 class RpiNeoPixelSPI:
@@ -104,7 +100,7 @@ class RpiNeoPixelSPI:
                 *,
                 device: int = 0,
                 gamma_func: Callable | None = default_gamma,
-                color_mode: str = "HSV", 
+                color_mode: str = "HSV",
                 brightness: float = 1.0, 
                 auto_write: bool= False,
                 pixel_order: str = "GRB",
@@ -135,13 +131,13 @@ class RpiNeoPixelSPI:
 
         self.__num_pixels = num_pixels
         self.__brightness = float(np.clip(brightness, 0.0, 1.0))
+
         if gamma_func is None:
             self.__gamma_func = lambda x: x
         else:
             self.__gamma_func = gamma_func
         self.__auto_write = auto_write
         self.__pixel_buffer = np.zeros((self.__num_pixels, len(self.__pixel_order)), dtype=float)
-
          
         if len(self.__pixel_order) == 4:
             self.bits_per_pixel = 16
@@ -407,12 +403,9 @@ class RpiNeoPixelSPI:
         """Destructor to ensure cleanup"""
         self.cleanup()
 
-
-def Demo():
-    from time import sleep
-    from random import randrange, random
-
-    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV") as neo:
+def GammaTest():
+    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", 
+                        gamma_func=default_gamma) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = 1, 0, v
@@ -420,5 +413,16 @@ def Demo():
         neo()
 
 
+def Rainbow():
+    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", 
+                        gamma_func=default_gamma, 
+                        auto_write=True) as neo:
+        for i in range(neo.num_pixels):
+            v = i/(neo.num_pixels-1)
+            color = v, 1, 1
+            neo[i] = color
+
+
 if __name__ == "__main__":
-    Demo()
+    Rainbow()
+    GammaTest()
