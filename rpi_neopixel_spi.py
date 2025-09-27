@@ -7,11 +7,22 @@ Github: https://github.com/Hangover3832/rpi_neopixel_spi
 
 from dataclasses import dataclass
 import numpy as np
+from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Union, Callable
-from numpy.typing import NDArray
 from spidev import SpiDev
-from threading import Lock
+
+
+CUSTOM_GAMMA = np.array([
+    0.0,    # value for 0% brightness
+    0.25,   # value for 25% brightness
+    0.50,   # value for 50% brightness
+    0.75,   # value for 75% brightness
+    1.0     # value for 100% brightness
+])
+
+
+DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% for half the brightness
 
 
 def gamma_square(value: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
@@ -38,22 +49,19 @@ def gamma_linear(value:np.ndarray) -> np.ndarray:
     return np.clip(value, 0.0, 1.0)
 
 
-def gamma4g(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
-    """
-    4th order polynomial gamma correction function.
-    Parameters:
-        x (np.array or float): The input array of color values or a single float value.
-    Returns:
-        np.array or float: The gamma-corrected array or float value.
-    """
-    p1 = 0.11
-    p2 = 0.35
-    d = 0.5
-    a = -16*d/3 + 128*p1/3 - 128*p2/9 + 16/3
-    b = 32*d/3 - 224*p1/3 + 160*p2/9 - 16/3
-    c = -19*d/3 + 32*p1 - 32*p2/9 + 1
-    e = 0.
-    return np.polynomial.Polynomial((e, d, c, b, a), domain=(0., 1.), window=(0., 1.))(x)
+def poly4Fit(value_in: Union[np.ndarray, float], values_out: np.ndarray) -> Union[np.ndarray, float]:
+    """apply a 4th degree polynomial fit"""
+    vIn = np.array([0., 0.25, 0.5, 0.75, 1.0])
+    poly = Poly.fit(vIn, values_out, deg=4)
+    return poly(value_in)
+
+
+def CustomGamma(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
+    return poly4Fit(x, CUSTOM_GAMMA)
+
+
+def default_gamma(x: Union[np.ndarray, float]) -> Union[np.ndarray, float]:
+    return poly4Fit(x, DEFAULT_GAMMA)
 
 
 class RpiNeoPixelSPI:
@@ -85,7 +93,7 @@ class RpiNeoPixelSPI:
     CLOCK_400KHZ        = 1_625_000
     CLOCK_800KHZ        = 3_250_000
     CLOCK_1200KHZ       = 6_500_000
-    # Add constants for SPI encoding
+    # constants for SPI encoding
     SPI_HIGH_BIT        = 0xC0
     SPI_LOW_BIT         = 0x80
     SPI_HIGH_BIT2       = 0x0C
@@ -96,7 +104,7 @@ class RpiNeoPixelSPI:
                 num_pixels: int,
                 *,
                 device: int = 0,
-                gamma_func: Callable | None = gamma4g,
+                gamma_func: Callable | None = default_gamma,
                 color_mode: str = "HSV", 
                 brightness: float = 1.0, 
                 auto_write: bool= False,
@@ -224,7 +232,7 @@ class RpiNeoPixelSPI:
             rgb_buffer: np.ndarray = self.__pixel_buffer.copy()
 
         # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8
-        rgb_buffer = np.clip(np.round(self.__gamma_func(rgb_buffer * self.__brightness) * 255), 0, 255).astype(np.uint8)
+        rgb_buffer = np.clip(np.round(255 * self.__gamma_func(rgb_buffer * self.__brightness)), 0, 255).astype(np.uint8)
 
         # rows are now pixels, columns are R,G,B,(W)
         # lets rearange the rgb_buffer to the correct pixel order
@@ -405,24 +413,12 @@ def Demo():
     from time import sleep
     from random import randrange, random
 
-
-    with RpiNeoPixelSPI(144, device=0, brightness=0.5, color_mode="HSV", pixel_order="GRB", gamma_func=gamma4g) as neo:
-        with RpiNeoPixelSPI(8, device=1, color_mode="RGB", brightness=0.5) as neo1:
-            neo1.set_value(0, 0.75, 1, 1, color_mode="HSV")
-            neo1.set_value(1, [1, 0, 0])
-            neo1.set_value(2, np.array([0, 1, 0]))
-            neo1[3] = [0, 0, 1]
-            neo1[4] = (1, 1, 0,)
-            neo1[5] = np.array([1, 0, 1])
-            neo1[6] = 0, 1, 1
-            neo1[7] = 1, 1, 1
-            neo1() # = neo.show()
-            for i in range(neo.num_pixels):
-                v = i/(neo.num_pixels-1)
-                color = 1, 0, v
-                neo(i, color) # immediate show() on this
-            neo.set_value([23, 96, 120], [0, 0, 1], color_mode="RGB")
-            sleep(1)
+    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV") as neo:
+        for i in range(neo.num_pixels):
+            v = i/(neo.num_pixels-1)
+            color = 1, 0, v
+            neo[i] = color
+        neo()
 
 
 if __name__ == "__main__":
