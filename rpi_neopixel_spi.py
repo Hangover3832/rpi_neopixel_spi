@@ -41,24 +41,28 @@ CRAZY_GAMMA = np.array([1.0, 0.0, 1.0])
 # dark pixels are bright, bright pixels are bright and middle pixels are dark ;-)
 
 
-def PolyFit(value_in: Union[np.ndarray, float], values_out: np.ndarray) -> Union[np.ndarray, float]:
-    """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points"""
+def PolyFit(values_out: np.ndarray) -> Poly:
+    """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points.
+    Args:
+        values_out (np.ndarray): Array of output values for the polynomial fit.
+    Returns:
+        A polynomial function that maps input values in [0, 1] to the specified output values.
+    """
     n = len(values_out)
     assert n > 1, "Gamma polynomial must have more than 1 data points"
     vIn = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
-    poly = Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
-    return poly(value_in)
+    return Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
 
 
-custom_gamma = lambda x: PolyFit(x, CUSTOM_GAMMA)
-default_gamma = lambda x: PolyFit(x, DEFAULT_GAMMA)
-srgb_gamma = lambda x: PolyFit(x, SRGB_GAMMA)
-simple_gamma = lambda x: PolyFit(x, SIMPLE_GAMMA)
-no_dark_gamma = lambda x: PolyFit(x, NO_DARK_GAMMA)
-crazy_gamma = lambda x: PolyFit(x, CRAZY_GAMMA)
+custom_gamma = PolyFit(CUSTOM_GAMMA)
+default_gamma = PolyFit(DEFAULT_GAMMA)
+srgb_gamma = PolyFit(SRGB_GAMMA)
+simple_gamma = PolyFit(SIMPLE_GAMMA)
+no_dark_gamma = PolyFit(NO_DARK_GAMMA)
+crazy_gamma = PolyFit(CRAZY_GAMMA)
+inverse_gamma = PolyFit(DEFAULT_GAMMA[::-1])
 square_gamma = lambda x: np.square(x)
 linear_gamma = lambda x: x
-inverse_gamma = lambda x: PolyFit(x, DEFAULT_GAMMA[::-1])
 
 
 class RpiNeoPixelSPI:
@@ -101,7 +105,7 @@ class RpiNeoPixelSPI:
                 num_pixels: int,
                 *,
                 device: int = 0,
-                gamma_func: Callable | None = default_gamma,
+                gamma_func: Callable = default_gamma,
                 color_mode: str = "HSV",
                 brightness: float = 1.0, 
                 auto_write: bool= False,
@@ -301,22 +305,24 @@ class RpiNeoPixelSPI:
         self._write_buffer()
 
 
-    def Roll(self, shift: int = 1, wrap: bool = True) -> None:
+    def Roll(self, shift: int = 1, wrap: bool = True, value: np.ndarray | None = None) -> None:
         """Roll the pixel buffer by the specified shift amount.
         
         Args:
             shift (int): Number of positions to shift. Positive values shift right, negative values shift left.
-            wrap (bool): If True, pixels that roll off one end will reappear at the other end. If False, they will be set to black.
+            wrap (bool): If True, pixels that roll off one end will reappear at the other end. If False, they will be set
+            to value or black if no value.
         """
-        if wrap:
+        if wrap == True:
             self.__pixel_buffer = np.roll(self.__pixel_buffer, shift, axis=0)
         else:
+            value = self.blank if value is None else np.clip(value, 0.0, 1.0)
             if shift > 0:
                 self.__pixel_buffer[shift:] = self.__pixel_buffer[:-shift]
-                self.__pixel_buffer[:shift] = self.blank
+                self.__pixel_buffer[:shift] = self.__to_RGB(value)
             elif shift < 0:
                 self.__pixel_buffer[:shift] = self.__pixel_buffer[-shift:]
-                self.__pixel_buffer[shift:] = self.blank
+                self.__pixel_buffer[shift:] = self.__to_RGB(value)
 
         if self.__auto_write:
             self.show()
@@ -449,7 +455,7 @@ def Rainbow():
         while True:
             neo.Roll()
             neo()
-            sleep(0.005)
+            #sleep(0.005)
 
 
 if __name__ == "__main__":
