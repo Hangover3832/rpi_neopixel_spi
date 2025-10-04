@@ -5,6 +5,7 @@ License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
+from time import sleep
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
@@ -18,14 +19,14 @@ CUSTOM_GAMMA = np.array([
     0.50,   # value for 50% brightness
     0.75,   # value for 75% brightness
     1.0     # value for 100% brightness
-]) # insert more more values in between if desired
+]) # insert more values in between if desired
 
 SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
 """This is quite close to the square gamma where the middle grey is 25%"""
 
 DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% middle grey + my own magic
 """ 
-Note that Icreated this masterpiece of gamma based on the 18% middle grey principle
+Note that I created this masterpiece of gamma based on the 18% middle grey principle
 (Munsell, Sloan & Godlove, see https://en.wikipedia.org/wiki/Middle_gray) and just by my own subjective
 perception of brightness on a particular neopixel stripe.
 """
@@ -33,7 +34,7 @@ perception of brightness on a particular neopixel stripe.
 SRGB_GAMMA = np.array([0.0, 0.15, 0.214, 0.37, 1.0])
 # like default gamma but shifted towards sRGB
 
-NO_DARK_GAMMA = np.array([0.03, 0.5, 1.0])
+NO_DARK_GAMMA = np.array([0.02, 1.0])
 # no more dark pixels :-()
 
 CRAZY_GAMMA = np.array([1.0, 0.0, 1.0]) 
@@ -43,6 +44,7 @@ CRAZY_GAMMA = np.array([1.0, 0.0, 1.0])
 def PolyFit(value_in: Union[np.ndarray, float], values_out: np.ndarray) -> Union[np.ndarray, float]:
     """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points"""
     n = len(values_out)
+    assert n > 1, "Gamma polynomial must have more than 1 data points"
     vIn = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
     poly = Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
     return poly(value_in)
@@ -291,12 +293,33 @@ class RpiNeoPixelSPI:
 
     def clear(self) -> None:
         """Clear all pixels by setting them to black."""
-        black = self.COLOR_RGB_BLACK_W if self._has_W else self.COLOR_RGB_BLACK
-        self.fill(black, color_mode="RGB")
+        self.fill(self.blank, color_mode="RGB")
 
 
     def show(self) -> None:
+        """Update the NeoPixels with the current pixel buffer."""
         self._write_buffer()
+
+
+    def Roll(self, shift: int = 1, wrap: bool = True) -> None:
+        """Roll the pixel buffer by the specified shift amount.
+        
+        Args:
+            shift (int): Number of positions to shift. Positive values shift right, negative values shift left.
+            wrap (bool): If True, pixels that roll off one end will reappear at the other end. If False, they will be set to black.
+        """
+        if wrap:
+            self.__pixel_buffer = np.roll(self.__pixel_buffer, shift, axis=0)
+        else:
+            if shift > 0:
+                self.__pixel_buffer[shift:] = self.__pixel_buffer[:-shift]
+                self.__pixel_buffer[:shift] = self.blank
+            elif shift < 0:
+                self.__pixel_buffer[:shift] = self.__pixel_buffer[-shift:]
+                self.__pixel_buffer[shift:] = self.blank
+
+        if self.__auto_write:
+            self.show()
 
 
     def __call__(self, *args):
@@ -305,10 +328,7 @@ class RpiNeoPixelSPI:
             case 0:
                 pass
             case 1: # clear pixel at index
-                if self._has_W:
-                    self[args[0]] = RpiNeoPixelSPI.COLOR_RGB_BLACK_W
-                else:
-                    self[args[0]] = RpiNeoPixelSPI.COLOR_RGB_BLACK
+                self[args[0]] = self.blank
             case 2: # set pixel at index(es)
                 if isinstance(args[0], (list, tuple)):
                     for i in args[0]:
@@ -321,6 +341,10 @@ class RpiNeoPixelSPI:
         if not self.__auto_write:
             self.show()
 
+    @property
+    def blank(self) -> np.ndarray:
+        """Get a black color value appropriate for the pixel type (RGB or RGBW)."""
+        return self.COLOR_RGB_BLACK_W if self._has_W else self.COLOR_RGB_BLACK
 
     @property
     def _has_W(self) -> bool:
@@ -403,6 +427,7 @@ class RpiNeoPixelSPI:
         """Destructor to ensure cleanup"""
         self.cleanup()
 
+
 def GammaTest():
     with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", 
                         gamma_func=default_gamma) as neo:
@@ -416,13 +441,17 @@ def GammaTest():
 def Rainbow():
     with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", 
                         gamma_func=default_gamma, 
-                        auto_write=True) as neo:
+                        auto_write=False) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = v, 1, 1
             neo[i] = color
+        while True:
+            neo.Roll()
+            neo()
+            sleep(0.005)
 
 
 if __name__ == "__main__":
     Rainbow()
-    GammaTest()
+    # GammaTest()
