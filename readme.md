@@ -38,6 +38,7 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - Auto-write mode
 - Context manager support
 - Clean shutdown with automatic LED clearing
+- Custom chip select pin (BCM pin mode)
 
 ## Installation
 
@@ -89,13 +90,18 @@ def rainbow_cycle(strip):
     
     # Rotate colors
     while True:
-        strip.Roll(1)  # Shift all colors one pixel
-        strip.show()
+        strip.roll(1)()  # Shift all colors one pixel and show()
         sleep(0.05)
 
 # Run rainbow effect on 60 LEDs
 with RpiNeoPixelSPI(60, brightness=0.5, color_mode="HSV") as strip:
     rainbow_cycle(strip)
+```
+
+### Using Custom Chip Select (cs) Pin
+```
+with RpiNeoPixelSPI(60, device=12, brightness=0.5, color_mode="HSV") as strip:
+# use BCM pin 12 as cs
 ```
 
 ### Using Different Color Modes
@@ -123,13 +129,11 @@ from rpi_neopixel_spi import RpiNeoPixelSPI, default_gamma, square_gamma
 
 # Using default gamma correction
 with RpiNeoPixelSPI(60, gamma_func=default_gamma) as strip:
-    strip.fill((0.5, 0.5, 0.5))  # Half brightness white
-    strip.show()
+    strip.fill((0.5, 0.5, 0.5))()  # Set half brightness white and show()
 
 # Using square gamma correction
 with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
-    strip.fill((0.5, 0.5, 0.5))  # More accurate half brightness
-    strip.show()
+    strip.fill((0.5, 0.5, 0.5))()  # More accurate half brightness and show()
 ```
 
 ## Buffer Size Limitation

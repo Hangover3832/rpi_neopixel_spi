@@ -5,13 +5,12 @@ License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
-from time import sleep
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Union, Callable
 from spidev import SpiDev
-
+import RPi.GPIO as GPIO
 
 CUSTOM_GAMMA = np.array([
     0.0,    # value for 0% brightness
@@ -123,16 +122,26 @@ class RpiNeoPixelSPI:
         if not self.__color_mode in self.COLOR_MODES:
             raise ValueError(f"Unexpected color mode: '{self.__color_mode}'")
 
-        # Initialize SPI device
-        if device not in [0, 1]:
-            raise ValueError("Error: SPI device must be 0 or 1.")
+        if device > 1: # use a custom chip select (cs) BCM pin
+            self._cs = device
+            device = 0
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self._cs, GPIO.OUT)
+            GPIO.output(self._cs, GPIO.HIGH)
+        else:
+            self._cs = None
+
         try:
             self._spi = SpiDev()
             self._spi.open(bus=0, device=device)
             self._spi.max_speed_hz = clock_rate
             self._spi.mode = 0
             self._spi.bits_per_word = 8
-        except:
+            if self._cs is not None:
+                self._spi.no_cs = True
+        except OSError: # catching a possible SpiDev.no_cs bug
+            pass
+        except: 
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
         self.__num_pixels = num_pixels
@@ -257,7 +266,11 @@ class RpiNeoPixelSPI:
             self.__spi_buffer[i] = (np.where(bit1, self.SPI_HIGH_BIT, self.SPI_LOW_BIT) | np.where(bit2, self.SPI_HIGH_BIT2, self.SPI_LOW_BIT2)).astype(np.uint8)
 
         # Send data to device
+        if self._cs:
+            GPIO.output(self._cs, GPIO.LOW)
         self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
+        if self._cs:
+            GPIO.output(self._cs, GPIO.HIGH)
 
 
     def __setitem__(self, index: int, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
@@ -273,7 +286,7 @@ class RpiNeoPixelSPI:
             self.show()
 
 
-    def set_value(self, index: int | list[int], *values, color_mode: str | None = None) -> None:
+    def set_value(self, index: int | list[int], *values, color_mode: str | None = None) -> 'RpiNeoPixelSPI':
         if isinstance(index, int):
             index = [index]
 
@@ -282,22 +295,25 @@ class RpiNeoPixelSPI:
                 self.__setitem__(i, values[0], color_mode=color_mode)
             else:
                 self.__setitem__(i, values, color_mode=color_mode)
+        return self
 
 
     def __getitem__(self, index: int) -> np.ndarray:
         return self.__from_RGB(self.__pixel_buffer[index])
 
 
-    def fill(self, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
+    def fill(self, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> 'RpiNeoPixelSPI':
         rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
         self.__pixel_buffer [:] = rgb
         if self.__auto_write:
             self.show()
+        return self
 
 
-    def clear(self) -> None:
+    def clear(self) -> 'RpiNeoPixelSPI':
         """Clear all pixels by setting them to black."""
         self.fill(self.blank, color_mode="RGB")
+        return self
 
 
     def show(self) -> None:
@@ -305,7 +321,7 @@ class RpiNeoPixelSPI:
         self._write_buffer()
 
 
-    def Roll(self, shift: int = 1, wrap: bool = True, value: np.ndarray | None = None) -> None:
+    def roll(self, shift: int = 1, wrap: bool = True, value: np.ndarray | None = None) -> 'RpiNeoPixelSPI':
         """Roll the pixel buffer by the specified shift amount.
         
         Args:
@@ -327,8 +343,10 @@ class RpiNeoPixelSPI:
         if self.__auto_write:
             self.show()
 
+        return self
 
-    def __call__(self, *args):
+
+    def __call__(self, *args) -> 'RpiNeoPixelSPI':
         # immediate update
         match len(args):
             case 0:
@@ -346,6 +364,8 @@ class RpiNeoPixelSPI:
             
         if not self.__auto_write:
             self.show()
+        return self
+
 
     @property
     def blank(self) -> np.ndarray:
@@ -445,17 +465,18 @@ def GammaTest():
 
 
 def Rainbow():
-    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", 
+    from time import sleep
+    with RpiNeoPixelSPI(144, device=12, brightness=0.1, color_mode="HSV", 
                         gamma_func=default_gamma, 
                         auto_write=False) as neo:
+        neo.clear()() # clear() and show()
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = v, 1, 1
             neo[i] = color
         while True:
-            neo.Roll()
-            neo()
-            #sleep(0.005)
+            neo.roll()() # roll() and show()
+            sleep(0.01)
 
 
 if __name__ == "__main__":
