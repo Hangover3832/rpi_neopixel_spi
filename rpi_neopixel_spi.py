@@ -10,7 +10,8 @@ from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Union, Callable
 from spidev import SpiDev
-import RPi.GPIO as GPIO
+from gpiozero import OutputDevice
+
 
 CUSTOM_GAMMA = np.array([
     0.0,    # value for 0% brightness
@@ -59,9 +60,9 @@ srgb_gamma = PolyFit(SRGB_GAMMA)
 simple_gamma = PolyFit(SIMPLE_GAMMA)
 no_dark_gamma = PolyFit(NO_DARK_GAMMA)
 crazy_gamma = PolyFit(CRAZY_GAMMA)
-inverse_gamma = PolyFit(DEFAULT_GAMMA[::-1])
 square_gamma = lambda x: np.square(x)
 linear_gamma = lambda x: x
+inverse_gamma = lambda x: 1- x
 
 
 class RpiNeoPixelSPI:
@@ -72,6 +73,7 @@ class RpiNeoPixelSPI:
         device (int, optional): SPI device number. Defaults to 0.
             device=0 -> /dev/spidev0.0 uses BCM pins 8 (CE0), 9 (MISO), 10 (MOSI), 11 (SCLK)
             device=1 -> /dev/spidev0.1 uses BCM pins 7 (CE1), 9 (MISO), 10 (MOSI), 11 (SCLK)
+            -device -> /dev/spidev0.0 uses BCM pins <device> (CE), 9 (MISO), 10 (MOSI), 11 (SCLK)
         gamma_func (Callable, optional): Function to apply gamma correction. Defaults to gamma4g.
         color_mode (str, optional): Color mode for input values. Options are "RGB", "HSV", "YIQ", "HLS". Defaults to "HSV".
         brightness (float, optional): Brightness level (0.0 to 1.0). Defaults to 1.0.
@@ -109,27 +111,26 @@ class RpiNeoPixelSPI:
                 brightness: float = 1.0, 
                 auto_write: bool= False,
                 pixel_order: str = "GRB",
-                clock_rate: int = CLOCK_800KHZ
+                clock_rate: int = CLOCK_800KHZ,
+                custom_cs: int | None = None,
                 ) -> None:
 
         self.__pixel_order = pixel_order.upper()
-        if self.__pixel_order in self.PIXEL_ORDERS:
-            pass
-        else:
+        if self.__pixel_order not in self.PIXEL_ORDERS:
             raise ValueError(f"Unexpected pixel order: {self.__pixel_order}")
 
         self.__color_mode = color_mode.upper()
-        if not self.__color_mode in self.COLOR_MODES:
+        if self.__color_mode not in self.COLOR_MODES:
             raise ValueError(f"Unexpected color mode: '{self.__color_mode}'")
 
-        if device > 1: # use a custom chip select (cs) BCM pin
-            self._cs = device
+        if custom_cs is not None: # use a custom chip select (cs) BCM pin
+            self._cs = OutputDevice(custom_cs, active_high=False, initial_value=True)
             device = 0
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self._cs, GPIO.OUT)
-            GPIO.output(self._cs, GPIO.HIGH)
         else:
             self._cs = None
+
+        if device not in [0, 1]:
+            raise ValueError("Error: device must be in range [0, 1]")
 
         try:
             self._spi = SpiDev()
@@ -139,8 +140,8 @@ class RpiNeoPixelSPI:
             self._spi.bits_per_word = 8
             if self._cs is not None:
                 self._spi.no_cs = True
-        except OSError: # catching a possible SpiDev.no_cs bug
-            pass
+        except OSError: # catching a possible SpiDev.no_cs error as the rasbian kernel driver might not suppoprt it
+            pass # in this case, the default cip select signal on pin 8 is still handled by the driver beside the user defined pin
         except: 
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
@@ -152,19 +153,19 @@ class RpiNeoPixelSPI:
         else:
             self.__gamma_func = gamma_func
         self.__auto_write = auto_write
-        self.__pixel_buffer = np.zeros((self.__num_pixels, len(self.__pixel_order)), dtype=float)
-         
+        self.__pixel_buffer = np.zeros((self.__num_pixels, len(self.__pixel_order)), dtype=np.float32)
+
         if len(self.__pixel_order) == 4:
-            self.bits_per_pixel = 16
+            self._double_bits_per_pixel = 16
             self.__msb_mask = 0x80000000
             self.__c_mask = 0xFFFFFFFF
         else:
-            self.bits_per_pixel = 12
+            self._double_bits_per_pixel = 12
             self.__msb_mask = 0x800000
             self.__c_mask = 0xFFFFFF
 
-        # Pre-allocate buffer
-        self.__spi_buffer = np.zeros([self.bits_per_pixel, self.num_pixels], dtype=np.uint8)
+        # Pre-allocate buffer for the encoded bits
+        self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
 
 
     def __to_RGB(self, value: np.ndarray, color_mode: str | None = None) -> np.ndarray:
@@ -245,7 +246,7 @@ class RpiNeoPixelSPI:
         rgb_buffer = np.clip(np.round(255 * self.__gamma_func(rgb_buffer * self.__brightness)), 0, 255).astype(np.uint8)
 
         # rows are now pixels, columns are R,G,B,(W)
-        # lets rearange the rgb_buffer to the correct pixel order
+        # rearange the rgb_buffer to the correct pixel order
         # Here, we allow every possible pixel order with R,G,B and optional W
         rgb_buffer = rgb_buffer[:, [self.__pixel_order.index(c) for c in 'RGBW' if c in self.__pixel_order]]
 
@@ -256,28 +257,27 @@ class RpiNeoPixelSPI:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00, 0x1_00, 1], dtype=np.uint32)
         rgb_buffer = np.bitwise_or.reduce(rgb_buffer, axis=1, dtype=np.uint32)
 
-        # shift out 2 bits of each pixel and encode to a byte for SPI transmission 
-        for i in range(self.bits_per_pixel):
+        # shift out 2 bits of each pixel and encode them to a byte for SPI transmission:
+        for i in range(self._double_bits_per_pixel):
             bit1 = (rgb_buffer & self.__msb_mask).astype(bool)
             rgb_buffer = ((rgb_buffer << 1) & self.__c_mask).astype(np.uint32)
             bit2 = (rgb_buffer & self.__msb_mask).astype(bool) 
             rgb_buffer = ((rgb_buffer << 1) & self.__c_mask).astype(np.uint32)
-            # encode 2 pixel bits into 1 SPI byte
+            # encode 2 pixel bits into 1 SPI byte:
             self.__spi_buffer[i] = (np.where(bit1, self.SPI_HIGH_BIT, self.SPI_LOW_BIT) | np.where(bit2, self.SPI_HIGH_BIT2, self.SPI_LOW_BIT2)).astype(np.uint8)
 
-        # Send data to device
-        if self._cs:
-            GPIO.output(self._cs, GPIO.LOW)
+        # Send data to device:
+        if self._cs is not None:
+            self._cs.on() # chip enable
         self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
-        if self._cs:
-            GPIO.output(self._cs, GPIO.HIGH)
+        if self._cs is not None:
+            self._cs.off() # chip disable
 
 
     def __setitem__(self, index: int, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
         rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
 
         if rgb.shape[0] == 3 and self._has_W:
-            # rgb = np.append(rgb, self.__pixel_buffer[index][3])
             self.__pixel_buffer[index][0:3] = rgb
         else:
             self.__pixel_buffer[index] = rgb
@@ -316,9 +316,10 @@ class RpiNeoPixelSPI:
         return self
 
 
-    def show(self) -> None:
+    def show(self) -> 'RpiNeoPixelSPI':
         """Update the NeoPixels with the current pixel buffer."""
         self._write_buffer()
+        return self
 
 
     def roll(self, shift: int = 1, wrap: bool = True, value: np.ndarray | None = None) -> 'RpiNeoPixelSPI':
@@ -351,8 +352,14 @@ class RpiNeoPixelSPI:
         match len(args):
             case 0:
                 pass
-            case 1: # clear pixel at index
-                self[args[0]] = self.blank
+
+            case 1: # clear pixel at index(es)
+                if isinstance(args[0], (list, tuple)):
+                    for i in args[0]:
+                        self[i] = self.blank
+                else:
+                    self[args[0]] = self.blank
+
             case 2: # set pixel at index(es)
                 if isinstance(args[0], (list, tuple)):
                     for i in args[0]:
@@ -426,18 +433,30 @@ class RpiNeoPixelSPI:
     def num_pixels(self) -> int:
         """Get the number of pixels in the strip."""
         return self.__num_pixels
+    
+    @property
+    def CS(self) -> OutputDevice | None:
+        return self._cs
 
 
     def cleanup(self) -> None:
         """
-        Clean up resources by closing the SPI device.
+        Clean up resources by closing the devices.
         Should be called when done using the NeoPixel strip.
         """
+        if hasattr(self, '_cs') and self._cs is not None:
+            try:
+                self._cs.close()
+            except Exception as e:
+                print(f"Warning: Error during cleanup (pin): {e}")
+            finally:
+                self._cs = None
+
         if hasattr(self, '_spi') and self._spi is not None:
             try:
                 self._spi.close()
             except Exception as e:
-                print(f"Warning: Error during cleanup: {e}")
+                print(f"Warning: Error during cleanup (spi): {e}")
             finally:
                 self._spi = None
 
@@ -466,8 +485,8 @@ def GammaTest():
 
 def Rainbow():
     from time import sleep
-    with RpiNeoPixelSPI(144, device=12, brightness=0.1, color_mode="HSV", 
-                        gamma_func=default_gamma, 
+    with RpiNeoPixelSPI(144, device=0, brightness=0.1, color_mode="HSV",
+                        gamma_func=default_gamma,
                         auto_write=False) as neo:
         neo.clear()() # clear() and show()
         for i in range(neo.num_pixels):

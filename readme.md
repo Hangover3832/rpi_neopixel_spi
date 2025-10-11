@@ -48,14 +48,14 @@ sudo raspi-config
 # Navigate to Interface Options -> SPI -> Enable
 ```
 
-2. Install required packages:
-```bash
-pip install numpy spidev
-```
-
-3. Clone this repository:
+2. Clone this repository:
 ```bash
 git clone https://github.com/Hangover3832/rpi_neopixel_spi.git
+```
+
+3. Install required packages:
+```bash
+pip3 install -r requirements.txt
 ```
 
 ## Basic Usage
@@ -100,7 +100,7 @@ with RpiNeoPixelSPI(60, brightness=0.5, color_mode="HSV") as strip:
 
 ### Using Custom Chip Select (cs) Pin
 ```
-with RpiNeoPixelSPI(60, device=12, brightness=0.5, color_mode="HSV") as strip:
+with RpiNeoPixelSPI(60, custom_cs=12, brightness=0.5, color_mode="HSV") as strip:
 # use BCM pin 12 as cs
 ```
 
@@ -119,21 +119,24 @@ with RpiNeoPixelSPI(60) as strip:
     # HLS mode
     strip.color_mode = "HLS"
     strip[2] = (0.0, 0.5, 1.0)  # Red in HLS
-    
-    strip.show()
+
+    strip() # show strip
+
+    # Set a YIQ value regardless of the current color mode & show()
+    strip.set_value(3, (0.5, 0.5, 0.5), color_mode="YIQ")()
 ```
 
 ### Using Gamma Correction
 ```python
 from rpi_neopixel_spi import RpiNeoPixelSPI, default_gamma, square_gamma
 
-# Using default gamma correction
-with RpiNeoPixelSPI(60, gamma_func=default_gamma) as strip:
-    strip.fill((0.5, 0.5, 0.5))()  # Set half brightness white and show()
-
 # Using square gamma correction
 with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
-    strip.fill((0.5, 0.5, 0.5))()  # More accurate half brightness and show()
+    strip.fill((0.5, 0.5, 0.5))()  # Set half brightness and show()
+
+# Using default gamma correction
+with RpiNeoPixelSPI(60, gamma_func=default_gamma) as strip:
+    strip.fill((0.5, 0.5, 0.5))()  # Set more accurate half brightness white and show()
 ```
 
 ## Buffer Size Limitation
