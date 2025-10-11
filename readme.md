@@ -72,6 +72,9 @@ with RpiNeoPixelSPI(60, device=0, brightness=1.0) as strip:
     strip[1] = (0.0, 1.0, 0.0)
     # Update the strip
     strip.show()
+
+    _ = strip + 0.1 # add 0.1 to all pixel color values
+    (strip * 0.9)() # multiply all pixel color values with 0.9 and show()
 ```
 
 ### Rainbow Effect

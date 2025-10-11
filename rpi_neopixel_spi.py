@@ -130,7 +130,7 @@ class RpiNeoPixelSPI:
             self._cs = None
 
         if device not in [0, 1]:
-            raise ValueError("Error: device must be in range [0, 1]")
+            raise ValueError("Error: device must be 0 or 1")
 
         try:
             self._spi = SpiDev()
@@ -145,15 +145,15 @@ class RpiNeoPixelSPI:
         except: 
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
-        self.__num_pixels = num_pixels
-        self.__brightness = float(np.clip(brightness, 0.0, 1.0))
+        # self.__num_pixels = num_pixels
+        self.__brightness = float(np.clip(brightness, 0., 1.))
 
         if gamma_func is None:
             self.__gamma_func = lambda x: x
         else:
             self.__gamma_func = gamma_func
         self.__auto_write = auto_write
-        self.__pixel_buffer = np.zeros((self.__num_pixels, len(self.__pixel_order)), dtype=np.float32)
+        self.__pixel_buffer = np.zeros((num_pixels, len(self.__pixel_order)), dtype=np.float32)
 
         if len(self.__pixel_order) == 4:
             self._double_bits_per_pixel = 16
@@ -165,7 +165,8 @@ class RpiNeoPixelSPI:
             self.__c_mask = 0xFFFFFF
 
         # Pre-allocate buffer for the encoded bits
-        self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
+        # self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
+        self.__spi_buffer = np.zeros([self._double_bits_per_pixel, num_pixels], dtype=np.uint8)
 
 
     def __to_RGB(self, value: np.ndarray, color_mode: str | None = None) -> np.ndarray:
@@ -275,7 +276,7 @@ class RpiNeoPixelSPI:
 
 
     def __setitem__(self, index: int, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
-        rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
+        rgb = self.__to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
 
         if rgb.shape[0] == 3 and self._has_W:
             self.__pixel_buffer[index][0:3] = rgb
@@ -286,7 +287,7 @@ class RpiNeoPixelSPI:
             self.show()
 
 
-    def set_value(self, index: int | list[int], *values, color_mode: str | None = None) -> 'RpiNeoPixelSPI':
+    def set_value(self, index: int | list[int] | tuple[int], *values, color_mode: str | None = None) -> 'RpiNeoPixelSPI':
         if isinstance(index, int):
             index = [index]
 
@@ -303,10 +304,24 @@ class RpiNeoPixelSPI:
 
 
     def fill(self, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> 'RpiNeoPixelSPI':
-        rgb = self.__to_RGB(np.clip(value, 0.0, 1.0), color_mode=color_mode)
+        rgb = self.__to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
         self.__pixel_buffer [:] = rgb
         if self.__auto_write:
             self.show()
+        return self
+    
+   
+    def __add__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
+        """Add value to the pixel buffer in RGB space"""
+        self.__pixel_buffer[:] +=  value
+        self.__pixel_buffer =  np.clip(self.__pixel_buffer, 0., 1.)
+        return self
+
+
+    def __mul__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
+        """Multiply value with the pixel buffer in RGB space"""
+        self.__pixel_buffer[:] *=  value
+        self.__pixel_buffer =  np.clip(self.__pixel_buffer, 0., 1.)
         return self
 
 
@@ -333,7 +348,7 @@ class RpiNeoPixelSPI:
         if wrap == True:
             self.__pixel_buffer = np.roll(self.__pixel_buffer, shift, axis=0)
         else:
-            value = self.blank if value is None else np.clip(value, 0.0, 1.0)
+            value = self.blank if value is None else np.clip(value, 0., 1.)
             if shift > 0:
                 self.__pixel_buffer[shift:] = self.__pixel_buffer[:-shift]
                 self.__pixel_buffer[:shift] = self.__to_RGB(value)
@@ -432,7 +447,7 @@ class RpiNeoPixelSPI:
     @property
     def num_pixels(self) -> int:
         """Get the number of pixels in the strip."""
-        return self.__num_pixels
+        return self.__pixel_buffer.shape[0]
     
     @property
     def CS(self) -> OutputDevice | None:
@@ -444,6 +459,7 @@ class RpiNeoPixelSPI:
         Clean up resources by closing the devices.
         Should be called when done using the NeoPixel strip.
         """
+        self.clear()()
         if hasattr(self, '_cs') and self._cs is not None:
             try:
                 self._cs.close()
