@@ -145,7 +145,6 @@ class RpiNeoPixelSPI:
         except: 
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
-        # self.__num_pixels = num_pixels
         self.__brightness = float(np.clip(brightness, 0., 1.))
 
         if gamma_func is None:
@@ -165,8 +164,7 @@ class RpiNeoPixelSPI:
             self.__c_mask = 0xFFFFFF
 
         # Pre-allocate buffer for the encoded bits
-        # self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
-        self.__spi_buffer = np.zeros([self._double_bits_per_pixel, num_pixels], dtype=np.uint8)
+        self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
 
 
     def __to_RGB(self, value: np.ndarray, color_mode: str | None = None) -> np.ndarray:
