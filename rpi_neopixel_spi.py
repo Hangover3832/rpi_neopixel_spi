@@ -5,12 +5,21 @@ License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
+from enum import Enum, auto
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Union, Callable
-from spidev import SpiDev
-from gpiozero import OutputDevice
+
+try:
+    from spidev import SpiDev
+    from gpiozero import OutputDevice
+except:
+    print("""
+            Note: The python libraries 'gpiozero' and/or 'spidev' could not be imported.
+            Using dummy devices on a non Rapberry PI to simulate a Neopixel stripe in the console.
+          """)
+    from dummy_devices import SpiDev, OutputDevice
 
 
 CUSTOM_GAMMA = np.array([
@@ -65,6 +74,28 @@ linear_gamma = lambda x: x
 inverse_gamma = lambda x: 1- x
 
 
+class CM(Enum): # Color modes
+    RGB = auto()
+    HSV = auto()
+    YIQ = auto()
+    HLS = auto()
+
+
+class PO(Enum): # Pixel orders
+    RGB = auto()
+    GRB = auto()
+    #GBR = auto()
+    RGBW = auto()
+    GRBW = auto()
+    #GBRW = auto()
+
+
+class CLK(Enum): # SPI clock rates
+    CLOCK_400KHZ  = 1_625_000
+    CLOCK_800KHZ  = 3_250_000
+    CLOCK_1200KHZ = 6_500_000
+
+
 class RpiNeoPixelSPI:
     """    
     Driver for NeoPixel LEDs using SPI interface on a Raspberry PI.
@@ -73,29 +104,22 @@ class RpiNeoPixelSPI:
         device (int, optional): SPI device number. Defaults to 0.
             device=0 -> /dev/spidev0.0 uses BCM pins 8 (CE0), 9 (MISO), 10 (MOSI), 11 (SCLK)
             device=1 -> /dev/spidev0.1 uses BCM pins 7 (CE1), 9 (MISO), 10 (MOSI), 11 (SCLK)
-            -device -> /dev/spidev0.0 uses BCM pins <device> (CE), 9 (MISO), 10 (MOSI), 11 (SCLK)
         gamma_func (Callable, optional): Function to apply gamma correction. Defaults to gamma4g.
-        color_mode (str, optional): Color mode for input values. Options are "RGB", "HSV", "YIQ", "HLS". Defaults to "HSV".
+        color_mode (CM, optional): Color mode for input values. Options are RGB, HSV, YIQ, HLS. Defaults to HSV.
         brightness (float, optional): Brightness level (0.0 to 1.0). Defaults to 1.0.
         auto_write (bool, optional): If True, updates the LEDs automatically on value change. Defaults to False.
-        pixel_order (str, optional): Order of color channels in the NeoPixel (e.g., "GRB", "RGBW"). Defaults to "GRB".
-        clock_rate (int, optional): SPI clock rate in Hz. Defaults to CLOCK_800KHZ.
-    Clock Rates:
-        CLOCK_400KHZ  (1,625,000 Hz): Standard rate for WS2812 pixels
-        CLOCK_800KHZ  (3,250,000 Hz): High-speed rate for WS2812B pixels
-        CLOCK_1200KHZ (6,500,000 Hz): Maximum rate for some pixels
+        pixel_order (PO, optional): Order of color channels in the NeoPixel (e.g., GRB, RGBW). Defaults to GRB.
+        clock_rate (CLK, optional): SPI clock rate in Hz. Defaults to CLOCK_800KHZ.
+    Clock Rates CLK:
+        CLK.CLOCK_400KHZ  (1,625,000 Hz): Standard rate for WS2812 pixels
+        CLK.CLOCK_800KHZ  (3,250,000 Hz): High-speed rate for WS2812B pixels
+        CLK.CLOCK_1200KHZ (6,500,000 Hz): Maximum rate for some pixels
     """
 
     COLOR_RGB_BLACK     = np.array([0., 0., 0.])
     COLOR_RGB_BLACK_W   = np.array([0., 0., 0., 0.])
     COLOR_RGB_WHITE     = np.array([1., 1., 1.])
     COLOR_RGB_WHITE_W   = np.array([0., 0., 0., 1.])
-    COLOR_MODES         = ["RGB", "HSV", "YIQ", "HLS"]
-    PIXEL_ORDERS        = ["RGB", "RGBW", "GRB", "GRBW"]
-    CLOCK_400KHZ        = 1_625_000
-    CLOCK_800KHZ        = 3_250_000
-    CLOCK_1200KHZ       = 6_500_000
-    # constants for SPI encoding
     SPI_HIGH_BIT        = 0xC0
     SPI_LOW_BIT         = 0x80
     SPI_HIGH_BIT2       = 0x0C
@@ -107,21 +131,16 @@ class RpiNeoPixelSPI:
                 *,
                 device: int = 0,
                 gamma_func: Callable = default_gamma,
-                color_mode: str = "HSV",
+                color_mode: CM = CM.HSV,
                 brightness: float = 1.0, 
                 auto_write: bool= False,
-                pixel_order: str = "GRB",
-                clock_rate: int = CLOCK_800KHZ,
+                pixel_order: PO = PO.GRB,
+                clock_rate: CLK = CLK.CLOCK_800KHZ,
                 custom_cs: int | None = None,
                 ) -> None:
 
-        self.__pixel_order = pixel_order.upper()
-        if self.__pixel_order not in self.PIXEL_ORDERS:
-            raise ValueError(f"Unexpected pixel order: {self.__pixel_order}")
-
-        self.__color_mode = color_mode.upper()
-        if self.__color_mode not in self.COLOR_MODES:
-            raise ValueError(f"Unexpected color mode: '{self.__color_mode}'")
+        self.__pixel_order: PO = pixel_order
+        self.__color_mode: CM = color_mode
 
         if custom_cs is not None: # use a custom chip select (cs) BCM pin
             self._cs = OutputDevice(custom_cs, active_high=False, initial_value=True)
@@ -135,7 +154,7 @@ class RpiNeoPixelSPI:
         try:
             self._spi = SpiDev()
             self._spi.open(bus=0, device=device)
-            self._spi.max_speed_hz = clock_rate
+            self._spi.max_speed_hz = clock_rate.value
             self._spi.mode = 0
             self._spi.bits_per_word = 8
             if self._cs is not None:
@@ -152,9 +171,8 @@ class RpiNeoPixelSPI:
         else:
             self.__gamma_func = gamma_func
         self.__auto_write = auto_write
-        self.__pixel_buffer = np.zeros((num_pixels, len(self.__pixel_order)), dtype=np.float32)
 
-        if len(self.__pixel_order) == 4:
+        if (_num_led := len(self.__pixel_order.name)) == 4:
             self._double_bits_per_pixel = 16
             self.__msb_mask = 0x80000000
             self.__c_mask = 0xFFFFFFFF
@@ -163,23 +181,25 @@ class RpiNeoPixelSPI:
             self.__msb_mask = 0x800000
             self.__c_mask = 0xFFFFFF
 
+        self.__pixel_buffer = np.zeros((num_pixels, _num_led), dtype=np.float32)
+
         # Pre-allocate buffer for the encoded bits
         self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
 
 
-    def __to_RGB(self, value: np.ndarray, color_mode: str | None = None) -> np.ndarray:
+    def __to_RGB(self, value: np.ndarray, color_mode: CM | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to RGB"""
         if color_mode is None:
             color_mode= self.__color_mode
 
-        match color_mode.upper():
-            case "RGB":
+        match color_mode:
+            case CM.RGB:
                 result = value[0:3]
-            case "HSV":
+            case CM.HSV:
                 result = np.array(hsv_to_rgb(*value[0:3]))
-            case "YIQ":
+            case CM.YIQ:
                 result = np.array(yiq_to_rgb(*value[0:3]))
-            case "HLS":
+            case CM.HLS:
                 result = np.array(hls_to_rgb(*value[0:3]))
             case _:
                 raise ValueError(f"Unexpected color mode: '{color_mode}'")
@@ -190,12 +210,12 @@ class RpiNeoPixelSPI:
             return result
 
 
-    def __to_HSV(self, value: np.ndarray, color_mode: str | None ) -> np.ndarray:
+    def __to_HSV(self, value: np.ndarray, color_mode: CM | None ) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to HSV"""
         if color_mode is None:
             color_mode = self.__color_mode
 
-        if color_mode.upper() == "HSV":
+        if color_mode == CM.HSV:
             return value
         else:
             rgb = self.__to_RGB(value, color_mode)
@@ -207,19 +227,19 @@ class RpiNeoPixelSPI:
                 return hsv
  
 
-    def __from_RGB(self, rgb: np.ndarray, color_mode: str | None = None) -> np.ndarray:
+    def __from_RGB(self, rgb: np.ndarray, color_mode: CM | None = None) -> np.ndarray:
         """Convert value from RGB to color_mode (or, if not provided, to the current color mode)"""
         if color_mode is None:
             color_mode =self.__color_mode
 
-        match color_mode.upper():
-            case "RGB":
+        match color_mode:
+            case CM.RGB:
                 result = rgb[0:3]
-            case "HSV":
+            case CM.HSV:
                 result = np.array(rgb_to_hsv(*rgb[0:3]))
-            case "YIQ":
+            case CM.YIQ:
                 result = np.array(rgb_to_yiq(*rgb[0:3]))
-            case "HLS":
+            case CM.HLS:
                 result = np.array(rgb_to_hls(*rgb[0:3]))
             case _:
                 raise ValueError(f"Unexpected color mode: '{color_mode}'")
@@ -228,7 +248,7 @@ class RpiNeoPixelSPI:
             return np.append(result, rgb[3])
         else: 
             return result
-        
+
 
     def _write_buffer(self, rgb_buffer: np.ndarray | None = None) -> None: # type: ignore
         """
@@ -243,11 +263,14 @@ class RpiNeoPixelSPI:
 
         # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8
         rgb_buffer = np.clip(np.round(255 * self.__gamma_func(rgb_buffer * self.__brightness)), 0, 255).astype(np.uint8)
+        #if self._spi and hasattr(self._spi, "IS_DUMMY_DEVICE"):
+        #    self._spi.writebytes2(rgb_buffer)
+        #    return
 
         # rows are now pixels, columns are R,G,B,(W)
         # rearange the rgb_buffer to the correct pixel order
         # Here, we allow every possible pixel order with R,G,B and optional W
-        rgb_buffer = rgb_buffer[:, [self.__pixel_order.index(c) for c in 'RGBW' if c in self.__pixel_order]]
+        rgb_buffer = rgb_buffer[:, [self.__pixel_order.name.index(c) for c in 'RGBW' if c in self.__pixel_order.name]]
 
         # Convert [r, g, b, (w)] uint8 to a single uint32:
         if self._has_W:
@@ -268,12 +291,15 @@ class RpiNeoPixelSPI:
         # Send data to device:
         if self._cs is not None:
             self._cs.on() # chip enable
-        self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
+        #print(self.__spi_buffer.T.shape)
+        #quit()
+        #self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
+        self._spi.writebytes2(self.__spi_buffer.T) # type: ignore
         if self._cs is not None:
             self._cs.off() # chip disable
 
 
-    def __setitem__(self, index: int, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> None:
+    def __setitem__(self, index: int, value: Union[np.ndarray, list, tuple], color_mode: CM | None = None) -> None:
         rgb = self.__to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
 
         if rgb.shape[0] == 3 and self._has_W:
@@ -285,7 +311,7 @@ class RpiNeoPixelSPI:
             self.show()
 
 
-    def set_value(self, index: int | list[int] | tuple[int], *values, color_mode: str | None = None) -> 'RpiNeoPixelSPI':
+    def set_value(self, index: int | list[int] | tuple[int], *values, color_mode: CM | None = None) -> 'RpiNeoPixelSPI':
         if isinstance(index, int):
             index = [index]
 
@@ -301,7 +327,7 @@ class RpiNeoPixelSPI:
         return self.__from_RGB(self.__pixel_buffer[index])
 
 
-    def fill(self, value: Union[np.ndarray, list, tuple], color_mode: str | None = None) -> 'RpiNeoPixelSPI':
+    def fill(self, value: Union[np.ndarray, list, tuple], color_mode: CM | None = None) -> 'RpiNeoPixelSPI':
         rgb = self.__to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
         self.__pixel_buffer [:] = rgb
         if self.__auto_write:
@@ -325,7 +351,7 @@ class RpiNeoPixelSPI:
 
     def clear(self) -> 'RpiNeoPixelSPI':
         """Clear all pixels by setting them to black."""
-        self.fill(self.blank, color_mode="RGB")
+        self.fill(self.blank, color_mode=CM.RGB)
         return self
 
 
@@ -396,7 +422,6 @@ class RpiNeoPixelSPI:
     def _has_W(self) -> bool:
         return self.__pixel_buffer.shape[1] > 3
 
-
     @property
     def gamma(self):
         return self.__gamma_func
@@ -407,18 +432,13 @@ class RpiNeoPixelSPI:
         if self.__auto_write:
             self.show()
 
-
     @property 
-    def color_mode(self) -> str:
+    def color_mode(self) -> CM:
         return self.__color_mode
 
     @color_mode.setter
-    def color_mode(self, new_mode: str) -> None:
-        if new_mode in RpiNeoPixelSPI.COLOR_MODES:
-            self.__color_mode = new_mode
-        else:
-            raise ValueError(f"Error: Unknown color mode: '{new_mode}'")
-
+    def color_mode(self, new_mode: CM) -> None:
+        self.__color_mode = new_mode
 
     @property
     def brightness(self) -> float:
@@ -430,7 +450,6 @@ class RpiNeoPixelSPI:
         if self.__auto_write:
             self.show()
 
-
     @property
     def auto_write(self) -> bool:
         return self.__auto_write
@@ -440,7 +459,6 @@ class RpiNeoPixelSPI:
         if value and not self.__auto_write:
             self.show()
         self.__auto_write = value
-
 
     @property
     def num_pixels(self) -> int:
@@ -457,7 +475,7 @@ class RpiNeoPixelSPI:
         Clean up resources by closing the devices.
         Should be called when done using the NeoPixel strip.
         """
-        self.clear()()
+        # self.clear()()
         if hasattr(self, '_cs') and self._cs is not None:
             try:
                 self._cs.close()
@@ -488,7 +506,7 @@ class RpiNeoPixelSPI:
 
 
 def GammaTest():
-    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode="HSV", 
+    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode=CM.HSV, 
                         gamma_func=default_gamma) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
@@ -499,18 +517,16 @@ def GammaTest():
 
 def Rainbow():
     from time import sleep
-    with RpiNeoPixelSPI(144, device=0, brightness=0.1, color_mode="HSV",
-                        gamma_func=default_gamma,
-                        auto_write=False) as neo:
-        neo.clear()() # clear() and show()
+    with RpiNeoPixelSPI(144, device=0, custom_cs=12, brightness=1.0, color_mode=CM.HSV, gamma_func=linear_gamma) as neo:
+        # neo.clear()() # clear() and show()
+        neo.fill([1,0.5,0.25], color_mode=CM.RGB)()
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = v, 1, 1
             neo[i] = color
         while True:
             neo.roll()() # roll() and show()
-            sleep(0.01)
-
+            sleep(0.02)
 
 if __name__ == "__main__":
     Rainbow()

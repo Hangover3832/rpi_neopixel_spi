@@ -39,6 +39,7 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - Context manager support
 - Clean shutdown with automatic LED clearing
 - Custom chip select pin (BCM pin mode)
+- Neopixel stripe simulation in the console for on a non Rapberry Pi system
 
 ## Installation
 
@@ -62,16 +63,16 @@ pip3 install -r requirements.txt
 
 ### Simple Example
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from rpi_neopixel_spi import RpiNeoPixelSPI, CM
 
 # Create a strip of 60 LEDs
-with RpiNeoPixelSPI(60, device=0, brightness=1.0) as strip:
+with RpiNeoPixelSPI(60, device=0, brightness=1.0, color_mode=CM.RGB) as strip:
     # Set first LED to red
     strip[0] = (1.0, 0.0, 0.0)
     # Set second LED to green
     strip[1] = (0.0, 1.0, 0.0)
     # Update the strip
-    strip.show()
+    strip()
 
     _ = strip + 0.1 # add 0.1 to all pixel color values
     (strip * 0.9)() # multiply all pixel color values with 0.9 and show()
@@ -79,12 +80,12 @@ with RpiNeoPixelSPI(60, device=0, brightness=1.0) as strip:
 
 ### Rainbow Effect
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from rpi_neopixel_spi import RpiNeoPixelSPI, CM
 from time import sleep
 
 def rainbow_cycle(strip):
     # Initialize strip in HSV mode
-    strip.color_mode = "HSV"
+    strip.color_mode = CM.HSV
     
     # Create rainbow pattern
     for i in range(strip.num_pixels):
@@ -103,30 +104,30 @@ with RpiNeoPixelSPI(60, brightness=0.5, color_mode="HSV") as strip:
 
 ### Using Custom Chip Select (cs) Pin
 ```
-with RpiNeoPixelSPI(60, custom_cs=12, brightness=0.5, color_mode="HSV") as strip:
+with RpiNeoPixelSPI(60, custom_cs=12, brightness=0.5, color_mode=CM.HSV) as strip:
 # use BCM pin 12 as cs
 ```
 
 ### Using Different Color Modes
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from rpi_neopixel_spi import RpiNeoPixelSPI, CM
 
 with RpiNeoPixelSPI(60) as strip:
-    # RGB mode (default)
+    # RGB mode
     strip[0] = (1.0, 0.0, 0.0)  # Red
     
-    # HSV mode
-    strip.color_mode = "HSV"
+    # HSV mode (default)
+    strip.color_mode = CM.HSV
     strip[1] = (0.0, 1.0, 1.0)  # Red in HSV
     
     # HLS mode
-    strip.color_mode = "HLS"
+    strip.color_mode = CM.HLS
     strip[2] = (0.0, 0.5, 1.0)  # Red in HLS
 
     strip() # show strip
 
     # Set a YIQ value regardless of the current color mode & show()
-    strip.set_value(3, (0.5, 0.5, 0.5), color_mode="YIQ")()
+    strip.set_value(3, (0.5, 0.5, 0.5), color_mode=CM.YIQ)()
 ```
 
 ### Using Gamma Correction
