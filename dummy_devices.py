@@ -1,6 +1,6 @@
 from abc import ABC
 import numpy as np
-from functools import reduce
+
 
 class DummyRPIDev(ABC):
 
@@ -9,16 +9,16 @@ class DummyRPIDev(ABC):
     def __init__(self) -> None:
         print(f"Initializig dummy device '{self.__class__.__name__}'", end="")
 
-    def open(self):
-        print("Dummy device open")
+    def open(self) -> None:
+        print(f"Dummy device open '{self.__class__.__name__}'")
 
-    def close(self):
-        print("Dummy device close")
+    def close(self) -> None:
+        print(f"Dummy device close '{self.__class__.__name__}'")
 
-    def on(self):
+    def on(self) -> None:
         return
     
-    def off(self):
+    def off(self) -> None:
         return
 
 
@@ -34,37 +34,25 @@ class SpiDev(DummyRPIDev):
         self.bits_per_word = 8
         self.no_cs = False
 
-    def open(self, bus: int = 0, device: int = 0):
+    def open(self, bus: int = 0, device: int = 0) -> None:
         print(f"Dummy SPI open, {bus=}, {device=}")
 
-    def writebytes2(self, buffer: np.ndarray):
-        # We simulate a GRB neopixel and completely decode the provided bit stream
+    def writebytes2(self, buffer: np.ndarray) -> None:
+        # We simulate a GRB neopixel, decode the provided spi byte stream
 
         def convert(bits: np.ndarray) -> int:
-            # bits = np.ndarray[uint8, uitn8, uint8, uint8]
+            # bits = np.ndarray[uint8, uitn8, uint8, uint8] = 4 double bits = 8 bits = 1 byte
+            bit_values = {0xCC: 0b11, 0xC8: 0b10, 0x8C: 0b01, 0x88: 0b00} # SPI encodings {1byte: 2bits}
             result = 0
             for bit in bits:
-                result = result << 2
-                match bit:
-                    case 0xCC:
-                        result ^= 0b11
-                    case 0xC8:
-                        result ^= 0b10
-                    case 0x8C:
-                        result ^= 0b01
-                    case 0x88:
-                        result ^= 0b00
-                    case other:
-                        raise Exception(f"Invalid bit pattern: {hex(other)}")
+                result = (result << 2) ^ bit_values[bit] # shift 2 bits and inject 2 new bits
             return result
 
         # buffer = buffer.reshape([buffer.shape[0]//12, 12])
         print('', end='\r')
-        for bits in buffer:
-            g = convert(bits[:4])
-            r = convert(bits[4:8])
-            b = convert(bits[8:])
-            print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='')
+        for bits in buffer: 
+            g, r, b = convert(bits[:4]), convert(bits[4:8]), convert(bits[8:])
+            print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='') # print the LED's
 
 
 class OutputDevice(DummyRPIDev):
