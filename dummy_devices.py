@@ -38,7 +38,7 @@ class SpiDev(DummyRPIDev):
         print(f"Dummy SPI open, {bus=}, {device=}")
 
     def writebytes2(self, buffer: np.ndarray) -> None:
-        # We simulate a GRB neopixel, decode the provided spi byte stream
+        # We simulate a GRB(W) neopixel, decode the provided spi byte stream
 
         def convert(bits: np.ndarray) -> int:
             # bits = np.ndarray[uint8, uitn8, uint8, uint8] = 4 double bits = 8 bits = 1 byte
@@ -51,8 +51,10 @@ class SpiDev(DummyRPIDev):
         # buffer = buffer.reshape([buffer.shape[0]//12, 12])
         print('', end='\r')
         for bits in buffer: 
-            g, r, b = convert(bits[:4]), convert(bits[4:8]), convert(bits[8:])
-            print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='') # print the LED's
+            g, r, b = convert(bits[0:4]), convert(bits[4:8]), convert(bits[8:12])
+            w = convert(bits[12:16]) if bits.shape[0]>12 else 0
+            print(f"\033[48;2;{w};{w};{w}m", end='')
+            print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='', flush=True) # print the LED's
 
 
 class OutputDevice(DummyRPIDev):

@@ -9,7 +9,9 @@ from enum import Enum, auto
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
-from typing import Union, Callable
+from typing import Callable
+
+from zmq import has
 
 try:
     from spidev import SpiDev # type: ignore
@@ -269,60 +271,50 @@ class RpiNeoPixelSPI:
             self._cs.off() # chip disable
 
 
-    def __setitem__(self, index: int, value: np.ndarray | list | tuple, color_mode: ColorMode | None = None) -> None:
-        rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
-
-        if rgb.shape[0] == 3 and self._has_W:
-            self.__pixel_buffer[index][0:3] = rgb
-        else:
-            self.__pixel_buffer[index] = rgb
-
-        if self.__auto_write:
-            self.show()
-
-
-    def set_value(self, index: int | list[int] | tuple[int], *values, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
-        if isinstance(index, int):
-            index = [index]
-
-        for i in index:
-            if isinstance(values[0], (list, np.ndarray, tuple)):
-                self.__setitem__(i, values[0], color_mode=color_mode)
-            else:
-                self.__setitem__(i, values, color_mode=color_mode)
-        return self
-
+    def __setitem__(self, index: int | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
+        self.set_value(index, value)
 
     def __getitem__(self, index: int) -> np.ndarray:
         return self._from_RGB(self.__pixel_buffer[index])
+    
+    def __len__(self):
+        return self.num_pixels
+
+
+    def _write_value_to_buffer(self, indexes: int | list[int] | tuple[int] | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
+        value = np.array(value)
+        if value.shape[0] == 3 and self._has_W:
+            # if RGB is passed but the stripe has RGBW, only store RGB and keep W as is
+            self.__pixel_buffer[indexes, :3] = value
+        else:
+            self.__pixel_buffer[indexes] = value
+
+
+    def set_value(self, indexes: int | list[int] | tuple[int] | slice, value: np.ndarray | list[float] | tuple[float, ...], color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
+        rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
+        self._write_value_to_buffer(indexes, rgb)
+        return self.show() if self.__auto_write else self
 
 
     def fill(self, value: np.ndarray | list | tuple, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
-        rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
-        self.__pixel_buffer [:] = rgb
-        if self.__auto_write:
-            self.show()
-        return self
-    
-   
+        return self.set_value(slice(None), value=value, color_mode=color_mode)
+
+
     def __add__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
         """Add value to the pixel buffer in RGB space"""
-        self.__pixel_buffer[:] +=  value
-        self.__pixel_buffer =  np.clip(self.__pixel_buffer, 0., 1.)
-        return self
+        self.__pixel_buffer =  np.clip(self.__pixel_buffer + value, 0., 1.)
+        return self.show() if self.__auto_write else self
 
 
     def __mul__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
         """Multiply value with the pixel buffer in RGB space"""
-        self.__pixel_buffer[:] *=  value
-        self.__pixel_buffer =  np.clip(self.__pixel_buffer, 0., 1.)
-        return self
+        self.__pixel_buffer =  np.clip(self.__pixel_buffer * value, 0., 1.)
+        return self.show() if self.__auto_write else self
 
 
     def clear(self) -> 'RpiNeoPixelSPI':
         """Clear all pixels by setting them to black."""
-        self.fill(self.blank, color_mode=ColorMode.RGB)
-        return self
+        return self.fill(self.blank, color_mode=ColorMode.RGB)
 
 
     def show(self) -> 'RpiNeoPixelSPI':
@@ -331,58 +323,43 @@ class RpiNeoPixelSPI:
         return self
 
 
-    def roll(self, shift: int = 1, wrap: bool = True, value: np.ndarray | None = None) -> 'RpiNeoPixelSPI':
+    def roll(self, shift: int = 1, value: np.ndarray | list[float] | tuple[float, ...] | None = None) -> 'RpiNeoPixelSPI':
         """Roll the pixel buffer by the specified shift amount.
-        
+
         Args:
             shift (int): Number of positions to shift. Positive values shift right, negative values shift left.
-            wrap (bool): If True, pixels that roll off one end will reappear at the other end. If False, they will be set
-            to value or black if no value.
+            value: If value is None, pixels that roll off one end will reappear at the other end. If a value is provided, 
+            pixels that roll in will ne set to this value.
         """
-        if wrap == True:
+
+        if value is None:
             self.__pixel_buffer = np.roll(self.__pixel_buffer, shift, axis=0)
         else:
-            value = self.blank if value is None else np.clip(value, 0., 1.)
+            value = np.array(value)
+
             if shift > 0:
                 self.__pixel_buffer[shift:] = self.__pixel_buffer[:-shift]
-                self.__pixel_buffer[:shift] = self._to_RGB(value)
+                self._write_value_to_buffer(slice(None,shift), value)
+
             elif shift < 0:
                 self.__pixel_buffer[:shift] = self.__pixel_buffer[-shift:]
-                self.__pixel_buffer[shift:] = self._to_RGB(value)
+                self._write_value_to_buffer(slice(shift, None), value)
 
-        if self.__auto_write:
-            self.show()
-
-        return self
+        return self.show() if self.__auto_write else self
 
 
-    def __call__(self, *args) -> 'RpiNeoPixelSPI':
+    def __call__(self,
+                 indexes: int | list[int] | tuple[int] | slice | None= None, 
+                 value: np.ndarray | list[float] | tuple[float, ...] | None = None
+                 ) -> 'RpiNeoPixelSPI':
         # immediate update
+        if indexes is None:
+            return self.show()
 
-        match len(args):
-            case 0:
-                pass
+        if value is None:
+            return self.set_value(indexes, self.blank)
 
-            case 1: # clear pixel at index(es)
-                if isinstance(args[0], (list, tuple)):
-                    for i in args[0]:
-                        self[i] = self.blank
-                else:
-                    self[args[0]] = self.blank
-
-            case 2: # set pixel at index(es)
-                if isinstance(args[0], (list, tuple)):
-                    for i in args[0]:
-                        self[i] = args[1] 
-                else:
-                    self[args[0]] = args[1]
-            case _:
-                raise ValueError("Too many arguments!")
-            
-        if not self.__auto_write:
-            self.show()
-
-        return self
+        return self.set_value(indexes, value)
 
 
     @property
@@ -395,11 +372,11 @@ class RpiNeoPixelSPI:
         return self.__pixel_buffer.shape[1] > 3
 
     @property
-    def gamma(self):
+    def gamma_func(self) -> Callable[[float], float]:
         return self.__gamma_func
 
-    @gamma.setter
-    def gamma(self, new_gamma) -> None:
+    @gamma_func.setter
+    def gamma_func(self, new_gamma: Callable[[float], float]) -> None:
         self.__gamma_func = new_gamma
         if self.__auto_write:
             self.show()
@@ -448,6 +425,9 @@ class RpiNeoPixelSPI:
         Should be called when done using the NeoPixel strip.
         """
         # self.clear()()
+        if hasattr(self._spi, "IS_DUMMY_DEVICE"):
+            print()
+
         if hasattr(self, '_cs') and self._cs is not None:
             try:
                 self._cs.close()
@@ -477,9 +457,27 @@ class RpiNeoPixelSPI:
         self.cleanup()
 
 
+def class_test():
+    from time import sleep
+
+    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW) as neo:
+        neo.clear()
+        neo.fill((1,1,1,0)) # fill white on black
+        neo([1,10,20,99], [0,0,0,1]) # set pixels 1, 10, 20 and 99 to black on white
+        neo[30:40] = 0, 0, 1, 1 # set pixels 30..39 to blue on white
+        neo[50] = 1, 0, 0 # set pixel 50 to red
+        neo[60] = 0, 1, 0 # set pixel 60 to green
+        neo() # show()
+        sleep(2)
+        for _ in range(25):
+            neo.roll()()
+            sleep(0.1)
+
+
+
 def GammaTest() -> None:
     with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode=ColorMode.HSV, 
-                        gamma_func=default_gamma) as neo:
+                        gamma_func=linear_gamma) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = 1, 0, v
@@ -489,16 +487,18 @@ def GammaTest() -> None:
 
 def Rainbow():
     from time import sleep
-    with RpiNeoPixelSPI(100, device=0, custom_cs=12, brightness=1.0, color_mode=ColorMode.HSV, gamma_func=linear_gamma) as neo:
+    with RpiNeoPixelSPI(100, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
         neo.clear()() # clear() and show()
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
-            color = v, 1, 1
+            color = v, 1., 1.
             neo[i] = color
         while True:
             neo.roll()() # roll() and show()
             sleep(0.02)
 
+
 if __name__ == "__main__":
+    class_test()
     Rainbow()
     # GammaTest()
