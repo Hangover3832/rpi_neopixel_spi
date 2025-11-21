@@ -39,9 +39,12 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - Context manager support
 - Clean shutdown with automatic LED clearing
 - Custom chip select pin (BCM pin mode)
+- Use operators for pixel manipulation and other effects
 - Neopixel stripe simulation in the console for on a non Rapberry Pi system
 
 ## Installation
+
+Python >= 3.10 is required
 
 1. Enable SPI on your Raspberry Pi:
 ```bash
@@ -61,78 +64,119 @@ pip3 install -r requirements.txt
 
 ## Basic Usage
 
-### Simple Example
+### Basic Examples
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI, CM
+import numpy as np
+from rpi_neopixel_spi import RpiNeoPixelSPI
+from colors import ColorMode
 
 # Create a strip of 60 LEDs
-with RpiNeoPixelSPI(60, device=0, brightness=1.0, color_mode=CM.RGB) as strip:
+with RpiNeoPixelSPI(60, device=0, brightness=1.0, color_mode=ColorMode.RGB) as strip:
     # Set first LED to red
     strip[0] = (1.0, 0.0, 0.0)
+
     # Set second LED to green
     strip[1] = (0.0, 1.0, 0.0)
-    # Update the strip
+
+    # Set pixels 25, 30, 42 and 59 to magenta and update
+    strip.set_value([25, 30, 42, 59], (1.0, 0.0, 1.0))()
+
+    # Slicing: 
+    # Set pixels 10 to 19 to blue
+    strip[10:20] = np.array([0.0, 0.0, 1.0])
+
+    # Set top half pixels to yellow and update
+    strip[30:] = (1.0, 1.0, 0.0)
     strip()
 
-    _ = strip + 0.1 # add 0.1 to all pixel color values
-    (strip * 0.9)() # multiply all pixel color values with 0.9 and show()
+    # Shift a yellow pixel in, and shift all other pixels by 1
+    strip.roll(shift=1, value=(1.0, 1.0, 0.0))()
 ```
 
 ### Rainbow Effect
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI, CM
+from rpi_neopixel_spi import RpiNeoPixelSPI
+from colors import ColorMode
 from time import sleep
 
 def rainbow_cycle(strip):
-    # Initialize strip in HSV mode
-    strip.color_mode = CM.HSV
-    
     # Create rainbow pattern
     for i in range(strip.num_pixels):
         hue = i / strip.num_pixels
         strip[i] = (hue, 1.0, 1.0)
-    
+
     # Rotate colors
     while True:
-        strip.roll(1)()  # Shift all colors one pixel and show()
+        strip.roll()() # Shift all colors one pixel and update
         sleep(0.05)
 
-# Run rainbow effect on 60 LEDs
-with RpiNeoPixelSPI(60, brightness=0.5, color_mode="HSV") as strip:
+# Run rainbow effect on 60 LEDs with half brithness
+with RpiNeoPixelSPI(60, brightness=0.5, color_mode=ColorMode.HSV) as strip:
     rainbow_cycle(strip)
 ```
 
 ### Using Custom Chip Select (cs) Pin
-```
-with RpiNeoPixelSPI(60, custom_cs=12, brightness=0.5, color_mode=CM.HSV) as strip:
-# use BCM pin 12 as cs
+```python
+with RpiNeoPixelSPI(60, custom_cs=12) as strip:
+    # use BCM pin 12 as cs
 ```
 
 ### Using Different Color Modes
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI, CM
+from rpi_neopixel_spi import RpiNeoPixelSPI
+from colors import ColorMode
 
 with RpiNeoPixelSPI(60) as strip:
     # RGB mode
     strip[0] = (1.0, 0.0, 0.0)  # Red
     
     # HSV mode (default)
-    strip.color_mode = CM.HSV
+    strip.color_mode = ColorMode.HSV
     strip[1] = (0.0, 1.0, 1.0)  # Red in HSV
     
     # HLS mode
-    strip.color_mode = CM.HLS
+    strip.color_mode = ColorMode.HLS
     strip[2] = (0.0, 0.5, 1.0)  # Red in HLS
 
     strip() # show strip
 
     # Set a YIQ value regardless of the current color mode & show()
-    strip.set_value(3, (0.5, 0.5, 0.5), color_mode=CM.YIQ)()
+    strip.set_value(3, (0.5, 0.5, 0.5), color_mode=ColorMode.YIQ)()
+```
+
+### Using operators
+```python
+from rpi_neopixel_spi import RpiNeoPixelSPI
+
+with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
+    # Make all leds white:
+    strip.fill((1.0, 1.0, 1.0))
+
+    # Dim all pixels to 75%
+    strip *= 0.75
+
+    # Add and subtract a value to each pixel
+    strip += 0.6
+    strip += -0.2
+
+    # Roll all pixels to the left or right with immediate update
+    strip <<= 1 # roll 1 pixel to left
+    strip >>= 2 # roll 2 pixels to the right
+
+    # Roll without immediate update
+    strip >> 1 # type: ignore
+    strip << 2 # type: ignore
+
+    # Invert all colors
+    ~strip # type ignore
+    (~strip)() # with update
+
 ```
 
 ### Using Gamma Correction
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI, default_gamma, square_gamma
+from rpi_neopixel_spi import RpiNeoPixelSPI
+from colors import default_gamma, square_gamma
 
 # Using square gamma correction
 with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
