@@ -351,6 +351,10 @@ class RpiNeoPixelSPI:
     @property
     def CS(self) -> OutputDevice | None:
         return self._cs
+    
+    @property
+    def num_pixels(self) -> int:
+        return self.__len__()
 
 
     def cleanup(self) -> None:
