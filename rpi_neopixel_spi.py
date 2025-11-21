@@ -5,86 +5,12 @@ License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
 
-from enum import Enum, auto
 import numpy as np
-from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Callable
-from devices import SpiDev, OutputDevice
-
-
-CUSTOM_GAMMA = np.array([
-    0.0,    # value for 0% brightness
-    0.25,   # value for 25% brightness
-    0.50,   # value for 50% brightness
-    0.75,   # value for 75% brightness
-    1.0     # value for 100% brightness
-]) # insert more values in between if desired
-
-SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
-"""This is quite close to the square gamma where the middle grey is 25%"""
-
-DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% middle grey + my own magic
-""" 
-Note that I created this masterpiece of gamma based on the 18% middle grey principle
-(Munsell, Sloan & Godlove, see https://en.wikipedia.org/wiki/Middle_gray) and just by my own subjective
-perception of brightness on a particular neopixel stripe.
-"""
-
-SRGB_GAMMA = np.array([0.0, 0.15, 0.214, 0.37, 1.0])
-# like default gamma but shifted towards sRGB
-
-NO_DARK_GAMMA = np.array([0.02, 1.0])
-# no more dark pixels :-()
-
-CRAZY_GAMMA = np.array([1.0, 0.0, 1.0]) 
-# dark pixels are bright, bright pixels are bright and middle pixels are dark ;-)
-
-
-def PolyFit(values_out: np.ndarray) -> Poly:
-    """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points.
-    Args:
-        values_out (np.ndarray): Array of output values for the polynomial fit.
-    Returns:
-        A polynomial function that maps input values in [0, 1] to the specified output values [0, 1].
-    """
-    n = len(values_out)
-    assert n > 1, "Gamma polynomial must have more than 1 data points"
-    vIn = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
-    return Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
-
-
-custom_gamma =  PolyFit(CUSTOM_GAMMA)
-default_gamma = PolyFit(DEFAULT_GAMMA)
-srgb_gamma =    PolyFit(SRGB_GAMMA)
-simple_gamma =  PolyFit(SIMPLE_GAMMA)
-no_dark_gamma = PolyFit(NO_DARK_GAMMA)
-crazy_gamma =   PolyFit(CRAZY_GAMMA)
-square_gamma =  lambda x: np.square(x)
-linear_gamma =  lambda x: x
-inverse_gamma = lambda x: 1-x
-
-
-class ColorMode(Enum): # Color modes
-    RGB = auto()
-    HSV = auto()
-    YIQ = auto()
-    HLS = auto()
-
-
-class PixelOrder(Enum): # Pixel orders
-    RGB = auto()
-    GRB = auto()
-    #GBR = auto()
-    RGBW = auto()
-    GRBW = auto()
-    #GBRW = auto()
-
-
-class Spi_Clock(Enum): # SPI clock rates
-    CLOCK_400KHZ  = 1_625_000
-    CLOCK_800KHZ  = 3_250_000
-    CLOCK_1200KHZ = 6_500_000
+from devices import SpiDev, OutputDevice # type: ignore
+from devices import Spi_Clock
+from colors import PixelOrder, ColorMode, default_gamma
 
 
 class RpiNeoPixelSPI:
@@ -145,9 +71,7 @@ class RpiNeoPixelSPI:
             raise ValueError("Error: device must be 0 or 1")
 
         try:
-            self._spi = SpiDev()
-            if hasattr(self._spi, "IS_DUMMY_DEVICE"):
-                self._spi.pixel_order = pixel_order
+            self._spi = SpiDev(pixel_order) if hasattr(SpiDev, "IS_DUMMY_DEVICE") else SpiDev()
             self._spi.open(bus=0, device=device)
             self._spi.max_speed_hz = clock_rate.value
             self._spi.mode = 0
@@ -203,10 +127,11 @@ class RpiNeoPixelSPI:
         return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
 
 
-    def _to_HSV(self, value: np.ndarray, color_mode: ColorMode | None ) -> np.ndarray:
+    def _to_HSV(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to HSV"""
 
-        if (color_mode := color_mode or self.__color_mode) == ColorMode.HSV:
+        color_mode = color_mode or self.__color_mode
+        if color_mode == ColorMode.HSV:
             return value
 
         rgb = self._to_RGB(value, color_mode)
@@ -257,19 +182,20 @@ class RpiNeoPixelSPI:
         if self._cs is not None:
             self._cs.on() # chip enable
         self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
-        #self._spi.writebytes2(self.__spi_buffer.T) # type: ignore
         if self._cs is not None:
             self._cs.off() # chip disable
 
 
     def __setitem__(self, index: int | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
+        """Indexed or sliced Beopixel access"""
         self.set_value(index, value)
 
     def __getitem__(self, index: int) -> np.ndarray:
         return self._from_RGB(self.__pixel_buffer[index])
     
-    def __len__(self):
-        return self.num_pixels
+    def __len__(self) -> int:
+        """Get the number of pixels in the strip."""
+        return self.__pixel_buffer.shape[0]
 
 
     def _write_value_to_buffer(self, indexes: int | list[int] | tuple[int] | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
@@ -291,16 +217,38 @@ class RpiNeoPixelSPI:
         return self.set_value(slice(None), value=value, color_mode=color_mode)
 
 
-    def __add__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
-        """Add value to the pixel buffer in RGB space"""
+    def __iadd__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
+        """Add value to the pixel buffer in RGB space, e.g. pixels += 0.1"""
         self.__pixel_buffer =  np.clip(self.__pixel_buffer + value, 0., 1.)
         return self.show() if self.__auto_write else self
 
-
-    def __mul__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
-        """Multiply value with the pixel buffer in RGB space"""
+    def __imul__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
+        """Multiply value with the pixel buffer in RGB space, e.g. neo *= 0.9"""
         self.__pixel_buffer =  np.clip(self.__pixel_buffer * value, 0., 1.)
         return self.show() if self.__auto_write else self
+
+    def __lshift__(self, amount: int) -> 'RpiNeoPixelSPI':
+        """roll to the left by amount, e.g. `pixels << 1`"""
+        return self.roll(int(-abs(amount)))
+
+    def __rshift__(self, amount: int) -> 'RpiNeoPixelSPI':
+        """roll to the right by amount, e.g. `pixels >> 1`"""
+        return self.roll(int(abs(amount)))
+
+    def __ilshift__(self, amount: int) -> 'RpiNeoPixelSPI':
+        """roll to the left by amount, e.g. `pixels <<= 1`"""
+        self.roll(int(-abs(amount)))
+        return self if self.auto_write else self.show()
+    
+    def __irshift__(self, amount: int) -> 'RpiNeoPixelSPI':
+        """roll to the right by amount, e.g. `pixels >>= 1`"""
+        self.roll(int(abs(amount)))
+        return self if self.auto_write else self.show()
+    
+    def __invert__(self)-> 'RpiNeoPixelSPI':
+        """Invert all colors of all pixels, e.g. `~pixels` """
+        self.__pixel_buffer = 1.0 - self.__pixel_buffer
+        return self.show() if self.auto_write else self
 
 
     def clear(self) -> 'RpiNeoPixelSPI':
@@ -340,7 +288,7 @@ class RpiNeoPixelSPI:
 
 
     def __call__(self,
-                 indexes: int | list[int] | tuple[int] | slice | None= None, 
+                 indexes: int | list[int] | tuple[int] | slice | None = None, 
                  value: np.ndarray | list[float] | tuple[float, ...] | None = None
                  ) -> 'RpiNeoPixelSPI':
         # immediate update
@@ -401,11 +349,6 @@ class RpiNeoPixelSPI:
         self.__auto_write = value
 
     @property
-    def num_pixels(self) -> int:
-        """Get the number of pixels in the strip."""
-        return self.__pixel_buffer.shape[0]
-    
-    @property
     def CS(self) -> OutputDevice | None:
         return self._cs
 
@@ -451,24 +394,26 @@ class RpiNeoPixelSPI:
 def class_test():
     from time import sleep
 
-    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRB, brightness=0.25) as neo:
-        neo.clear()
+    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1) as neo:
         neo.fill((1,1,1,0)) # fill white on black
         neo([1,10,20,99], [0,0,0,1]) # set pixels 1, 10, 20 and 99 to black on white
         neo[30:40] = 0, 0, 1, 1 # set pixels 30..39 to blue on white
         neo[50] = 1, 0, 0 # set pixel 50 to red
         neo[60] = 0, 1, 0 # set pixel 60 to green
         neo() # show()
-        sleep(2)
-        for _ in range(25):
-            neo.roll()()
-            sleep(0.1)
-
+        for _ in range(10):
+            neo << 1 # left roll by 1, but not show() # type: ignore
+            sleep(0.5)
+            (~neo)() # invert colors and show()
+            neo *= 0.9 # multiply all led values with 0.9
+        for _ in range(10):
+            neo += np.array([0,0,0,0.1]) # increase white LED by 0.1
+            neo >>= 2 # right roll by 2 and show()
+            sleep(0.5)
 
 
 def GammaTest() -> None:
-    with RpiNeoPixelSPI(144, device=0, brightness=0.25, color_mode=ColorMode.HSV, 
-                        gamma_func=linear_gamma) as neo:
+    with RpiNeoPixelSPI(144, device=0, brightness=0.25, color_mode=ColorMode.HSV) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = 1, 0, v
@@ -478,14 +423,15 @@ def GammaTest() -> None:
 
 def Rainbow():
     from time import sleep
-    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma, brightness=0.25) as neo:
+    from colors import linear_gamma
+    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma, brightness=1) as neo:
         neo.clear()() # clear() and show()
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = v, 1., 1.
             neo[i] = color
         while True:
-            neo.roll()() # roll() and show()
+            neo >>= 1 # roll() and show()
             sleep(0.02)
 
 
