@@ -10,18 +10,7 @@ import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Callable
-
-from zmq import has
-
-try:
-    from spidev import SpiDev # type: ignore
-    from gpiozero import OutputDevice  # type: ignore
-except:
-    print("""
-            Note: The python libraries 'gpiozero' and/or 'spidev' could not be imported.
-            Using dummy devices on a non Rapberry PI to simulate a Neopixel stripe in the console.
-          """)
-    from dummy_devices import SpiDev, OutputDevice
+from devices import SpiDev, OutputDevice
 
 
 CUSTOM_GAMMA = np.array([
@@ -157,6 +146,8 @@ class RpiNeoPixelSPI:
 
         try:
             self._spi = SpiDev()
+            if hasattr(self._spi, "IS_DUMMY_DEVICE"):
+                self._spi.pixel_order = pixel_order
             self._spi.open(bus=0, device=device)
             self._spi.max_speed_hz = clock_rate.value
             self._spi.mode = 0
@@ -265,8 +256,8 @@ class RpiNeoPixelSPI:
         # Send data to device:
         if self._cs is not None:
             self._cs.on() # chip enable
-        #self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
-        self._spi.writebytes2(self.__spi_buffer.T) # type: ignore
+        self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
+        #self._spi.writebytes2(self.__spi_buffer.T) # type: ignore
         if self._cs is not None:
             self._cs.off() # chip disable
 
@@ -460,7 +451,7 @@ class RpiNeoPixelSPI:
 def class_test():
     from time import sleep
 
-    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW) as neo:
+    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRB, brightness=0.25) as neo:
         neo.clear()
         neo.fill((1,1,1,0)) # fill white on black
         neo([1,10,20,99], [0,0,0,1]) # set pixels 1, 10, 20 and 99 to black on white
@@ -476,7 +467,7 @@ def class_test():
 
 
 def GammaTest() -> None:
-    with RpiNeoPixelSPI(144, device=0, brightness=1, color_mode=ColorMode.HSV, 
+    with RpiNeoPixelSPI(144, device=0, brightness=0.25, color_mode=ColorMode.HSV, 
                         gamma_func=linear_gamma) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
@@ -487,7 +478,7 @@ def GammaTest() -> None:
 
 def Rainbow():
     from time import sleep
-    with RpiNeoPixelSPI(100, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
+    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma, brightness=0.25) as neo:
         neo.clear()() # clear() and show()
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
