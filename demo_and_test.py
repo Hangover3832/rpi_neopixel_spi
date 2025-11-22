@@ -33,28 +33,34 @@ def class_test():
         neo *= 0.5
         neo()
         print(f" Power at {neo.power_consumption*100:.1f} %")
+        neo.clear()()
 
 
 def GammaTest() -> None:
-    with RpiNeoPixelSPI(100, device=0, color_mode=ColorMode.HSV, pixel_order=PixelOrder.GRBW) as neo:
+    with RpiNeoPixelSPI(100, device=0, color_mode=ColorMode.HSV, pixel_order=PixelOrder.GRB) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = 1, 0, v
             neo[i] = color
         neo()
+        neo.clear()()
 
 
 def Rainbow():
     from time import sleep
     from colors import linear_gamma
-    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
-        neo.clear()() # clear() and show()
+    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma, max_power=0.1) as neo:
         for i in range(neo.num_pixels):
             v = i/(neo.num_pixels-1)
             color = v, 1., 1.
             neo[i] = color
+        neo()
         while True:
+            if hasattr(neo._spi, 'IS_DUMMY_DEVICE'):
+                neo._spi.message = f" {neo.num_lit_pixels} lit LEDs, Power at {neo.power_consumption*100:.1f}%"
+
             neo >>= 1 # roll() and show()
+            
             sleep(0.02)
 
 
@@ -63,7 +69,7 @@ def Raindrops():
     from random import random, randint
     from time import sleep
 
-    @Every.every(0.2)
+    @Every.every(0.1)
     def drop(strip: RpiNeoPixelSPI):
         # place a random colored pixel at a random location
         index = randint(0, strip.num_pixels-1)
@@ -72,24 +78,27 @@ def Raindrops():
 
     @Every.every(0.01)
     def decay(strip: RpiNeoPixelSPI):
-        # reduce all pixel values to 99%
-        strip *= 0.99
+        # reduce all pixel values to 98%
+        strip *= 0.98
+        strip()
 
     @Every.every(5.0)
     def print_num(num: int):
         print(f"Number of lit LEDs: {num}")
 
-    with RpiNeoPixelSPI(100, gamma_func=linear_gamma) as neo:
+ 
+    with RpiNeoPixelSPI(144, gamma_func=linear_gamma, max_power=0.25) as neo:
         while True:
             if hasattr(neo._spi, 'IS_DUMMY_DEVICE'):
                 neo._spi.message = f" {neo.num_lit_pixels} lit LEDs, Power at {neo.power_consumption*100:.1f}%"
             drop(neo)
             decay(neo)
-            sleep(0.001)
+            # sleep(0.001)
 
 
 if __name__ == "__main__":
+    RpiNeoPixelSPI(320).clear()
     GammaTest()
     class_test()
     Raindrops()
-    #Rainbow()
+    Rainbow()

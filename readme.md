@@ -19,11 +19,10 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - **Built-in Gamma Correction**:
   - Linear (no correction)
   - Square gamma
-  - 4th order polynomial (gamma4g)
-  - Custom gamma interpolation
+  - Custom gamma interpolation (see colors.py)
   - Multiple pre-defined gamma curves:
     - Default gamma (18% middle grey)
-    - sRGB gamma
+    - sRGB gamma (21.4% middle grey)
     - Simple gamma
     - Custom gamma curves
 
@@ -41,10 +40,11 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
 - Custom chip select pin (BCM pin mode)
 - Use operators for pixel manipulation and other effects
 - Neopixel stripe simulation in the console for on a non Rapberry Pi system
+- Power limiter. Limit the total power consumption of the whole stripe. The brithness will automatically reduce if neccesary.
 
 ## Installation
 
-Python >= 3.10 is required
+Python >= 3.10 is required.
 
 1. Enable SPI on your Raspberry Pi:
 ```bash
@@ -111,7 +111,11 @@ def rainbow_cycle(strip):
         sleep(0.05)
 
 # Run rainbow effect on 60 LEDs with half brithness
-with RpiNeoPixelSPI(60, brightness=0.5, color_mode=ColorMode.HSV) as strip:
+with RpiNeoPixelSPI(60, 
+        brightness=1.0, 
+        color_mode=ColorMode.HSV,
+        max_power=0.25, # Set the power limit to 25%
+        ) as strip:
     rainbow_cycle(strip)
 ```
 
@@ -174,6 +178,7 @@ with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
 ```
 
 ### Using Gamma Correction
+
 ```python
 from rpi_neopixel_spi import RpiNeoPixelSPI
 from colors import default_gamma, square_gamma
@@ -186,6 +191,8 @@ with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
 with RpiNeoPixelSPI(60, gamma_func=default_gamma) as strip:
     strip.fill((0.5, 0.5, 0.5))()  # Set more accurate half brightness white and show()
 ```
+
+This module uses a polynomial regression to apply gamma corection. See `colors.py` for more details.
 
 ## Buffer Size Limitation
 

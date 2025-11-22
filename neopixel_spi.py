@@ -4,7 +4,7 @@ Author: AlexL
 License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
-from matplotlib import axis
+import math
 import numpy as np
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Callable
@@ -59,13 +59,16 @@ class RpiNeoPixelSPI:
                 pixel_order: PixelOrder = PixelOrder.GRB,
                 clock_rate: Spi_Clock = Spi_Clock.CLOCK_800KHZ,
                 custom_cs: int | None = None,
+                max_power: float = 1.0
                 ) -> None:
 
         self.__pixel_order: PixelOrder = pixel_order
         self.__color_mode: ColorMode = color_mode
         self.__auto_write = auto_write
         self._num_lit_pixels: int = 0
-        self._power_consumption: float = 0.0
+        self._current_power: float = 0.0
+        self._max_power: float = float(np.clip(max_power, 0.0, 1.0))
+        self.wats_per_led: float = 0.08
 
         if custom_cs is not None: # use a custom chip select (cs) BCM pin
             self._cs = OutputDevice(custom_cs, active_high=False, initial_value=True)
@@ -162,11 +165,16 @@ class RpiNeoPixelSPI:
 
         rgb_buffer = a_rgb_buffer if a_rgb_buffer is not None else self.__pixel_buffer.copy()
 
-        # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8
+        # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8:
         rgb_buffer = self.__gamma_func(rgb_buffer * self.__brightness)
-        self._power_consumption = np.sum(rgb_buffer)/rgb_buffer.size
+        self._current_power = np.sum(rgb_buffer)/rgb_buffer.size # get current power consumption
+        if (self._max_power > 0) and (self._current_power > self._max_power):
+            # Power consumption limiter
+            rgb_buffer *= self._max_power/self._current_power
+            self._current_power = self._max_power
+
         rgb_buffer = np.clip(np.round(255 * rgb_buffer), 0, 255).astype(np.uint8)
-        self._num_lit_pixels = np.max(np.count_nonzero(rgb_buffer, axis=0))
+        self._num_lit_pixels = np.count_nonzero(np.max(rgb_buffer, axis=1))
 
         # rows are now pixels, columns are R,G,B,(W)
         # rearange the rgb_buffer to the correct pixel order
@@ -387,8 +395,18 @@ class RpiNeoPixelSPI:
 
     @property
     def power_consumption(self) -> float:
-        return self._power_consumption
+        """Returns the total power consumption [0..1]"""
+        return self._current_power
     
+    @property
+    def max_power(self) -> float | None:
+        return self._max_power
+    
+    @max_power.setter
+    def max_power(self, max_power: float) -> None:
+        self._max_power = float(np.clip(max_power, 0.0, 1.0))
+        self._write_buffer()
+
 
     def cleanup(self) -> None:
         """
