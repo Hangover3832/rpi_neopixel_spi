@@ -4,13 +4,17 @@ Author: AlexL
 License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
-
+from matplotlib import axis
 import numpy as np
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Callable
 from devices import SpiDev, OutputDevice # type: ignore
 from devices import Spi_Clock
 from colors import PixelOrder, ColorMode, default_gamma
+
+
+PixelIndex = int | list[int] | tuple[int, ...] | slice
+PixelValue = np.ndarray | list[float] | tuple[float, ...] | float
 
 
 class RpiNeoPixelSPI:
@@ -60,6 +64,8 @@ class RpiNeoPixelSPI:
         self.__pixel_order: PixelOrder = pixel_order
         self.__color_mode: ColorMode = color_mode
         self.__auto_write = auto_write
+        self._num_lit_pixels: int = 0
+        self._power_consumption: float = 0.0
 
         if custom_cs is not None: # use a custom chip select (cs) BCM pin
             self._cs = OutputDevice(custom_cs, active_high=False, initial_value=True)
@@ -104,6 +110,8 @@ class RpiNeoPixelSPI:
     def _from_RGB(self, rgb: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from RGB to color_mode (or, if not provided, to the current color mode)"""
 
+        assert rgb.max()<=1.0 and rgb.min()>= 0.0
+
         result = {
             ColorMode.RGB: rgb[0:3],
             ColorMode.HSV: np.array(rgb_to_hsv(*rgb[0:3])),
@@ -116,6 +124,8 @@ class RpiNeoPixelSPI:
 
     def _to_RGB(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to RGB"""
+
+        assert value.max()<=1.0 and value.min()>= 0.0
 
         result = {
             ColorMode.RGB: value[0:3],
@@ -130,8 +140,9 @@ class RpiNeoPixelSPI:
     def _to_HSV(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to HSV"""
 
-        color_mode = color_mode or self.__color_mode
-        if color_mode == ColorMode.HSV:
+        assert value.max()<=1.0 and value.min()>= 0.0
+
+        if (color_mode := color_mode or self.__color_mode) == ColorMode.HSV:
             return value
 
         rgb = self._to_RGB(value, color_mode)
@@ -149,11 +160,13 @@ class RpiNeoPixelSPI:
                    If None, uses internal pixel buffer.
         """
 
-        rgb_buffer = a_rgb_buffer.copy() if a_rgb_buffer else self.__pixel_buffer.copy()
+        rgb_buffer = a_rgb_buffer if a_rgb_buffer is not None else self.__pixel_buffer.copy()
 
         # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8
-        rgb_buffer = 255 * self.__gamma_func(rgb_buffer * self.__brightness)
-        rgb_buffer = np.clip(np.round(rgb_buffer), 0, 255).astype(np.uint8)
+        rgb_buffer = self.__gamma_func(rgb_buffer * self.__brightness)
+        self._power_consumption = np.sum(rgb_buffer)/rgb_buffer.size
+        rgb_buffer = np.clip(np.round(255 * rgb_buffer), 0, 255).astype(np.uint8)
+        self._num_lit_pixels = np.max(np.count_nonzero(rgb_buffer, axis=0))
 
         # rows are now pixels, columns are R,G,B,(W)
         # rearange the rgb_buffer to the correct pixel order
@@ -186,7 +199,8 @@ class RpiNeoPixelSPI:
             self._cs.off() # chip disable
 
 
-    def __setitem__(self, index: int | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
+    # def __setitem__(self, index: int | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
+    def __setitem__(self, index: int | slice, value: PixelValue) -> None:
         """Indexed or sliced Beopixel access"""
         self.set_value(index, value)
 
@@ -198,22 +212,33 @@ class RpiNeoPixelSPI:
         return self.__pixel_buffer.shape[0]
 
 
-    def _write_value_to_buffer(self, indexes: int | list[int] | tuple[int] | slice, value: np.ndarray | list[float] | tuple[float, ...]) -> None:
-        value = np.array(value)
-        if value.shape[0] == 3 and self._has_W:
+    def _write_value_to_buffer(self, index: PixelIndex, value: PixelValue) -> None:
+        
+        if isinstance(value, (float, int)) and self._has_W:
+            # a simple number applies to the white pixel only if abailable
+            self.__pixel_buffer[index, 3] = value
+            return
+
+        if (value := np.array(value)).shape[0] == 3 and self._has_W:
             # if RGB is passed but the stripe has RGBW, only store RGB and keep W as is
-            self.__pixel_buffer[indexes, :3] = value
+            self.__pixel_buffer[index, :3] = value
+            return
+
+        self.__pixel_buffer[index] = value[:4]
+
+
+    def set_value(self, index: PixelIndex, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
+
+        if isinstance(value, (float, int)):
+            self._write_value_to_buffer(index, float(np.clip(value, 0.0, 1.0)))
         else:
-            self.__pixel_buffer[indexes] = value
+            rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
+            self._write_value_to_buffer(index, rgb)
 
-
-    def set_value(self, indexes: int | list[int] | tuple[int] | slice, value: np.ndarray | list[float] | tuple[float, ...], color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
-        rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
-        self._write_value_to_buffer(indexes, rgb)
         return self.show() if self.__auto_write else self
 
 
-    def fill(self, value: np.ndarray | list | tuple, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
+    def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
         return self.set_value(slice(None), value=value, color_mode=color_mode)
 
 
@@ -229,7 +254,7 @@ class RpiNeoPixelSPI:
 
     def __lshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the left by amount, e.g. `pixels << 1`"""
-        return self.roll(int(-abs(amount)))
+        return self.roll(-int(abs(amount)))
 
     def __rshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the right by amount, e.g. `pixels >> 1`"""
@@ -237,7 +262,7 @@ class RpiNeoPixelSPI:
 
     def __ilshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the left by amount, e.g. `pixels <<= 1`"""
-        self.roll(int(-abs(amount)))
+        self.roll(-int(abs(amount)))
         return self if self.auto_write else self.show()
     
     def __irshift__(self, amount: int) -> 'RpiNeoPixelSPI':
@@ -289,7 +314,7 @@ class RpiNeoPixelSPI:
 
     def __call__(self,
                  indexes: int | list[int] | tuple[int] | slice | None = None, 
-                 value: np.ndarray | list[float] | tuple[float, ...] | None = None
+                 value: np.ndarray | list[float] | tuple[float, ...] | float | None = None
                  ) -> 'RpiNeoPixelSPI':
         # immediate update
         if indexes is None:
@@ -356,6 +381,14 @@ class RpiNeoPixelSPI:
     def num_pixels(self) -> int:
         return self.__len__()
 
+    @property 
+    def num_lit_pixels(self) -> int:
+        return self._num_lit_pixels
+
+    @property
+    def power_consumption(self) -> float:
+        return self._power_consumption
+    
 
     def cleanup(self) -> None:
         """
@@ -363,7 +396,7 @@ class RpiNeoPixelSPI:
         Should be called when done using the NeoPixel strip.
         """
         # self.clear()()
-        if hasattr(self._spi, "IS_DUMMY_DEVICE"):
+        if hasattr(self._spi, 'IS_DUMMY_DEVICE'):
             print()
 
         if hasattr(self, '_cs') and self._cs is not None:
@@ -393,53 +426,3 @@ class RpiNeoPixelSPI:
     def __del__(self) -> None:
         """Destructor to ensure cleanup"""
         self.cleanup()
-
-
-def class_test():
-    from time import sleep
-
-    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1) as neo:
-        neo.fill((1,1,1,0)) # fill white on black
-        neo([1,10,20,99], [0,0,0,1]) # set pixels 1, 10, 20 and 99 to black on white
-        neo[30:40] = 0, 0, 1, 1 # set pixels 30..39 to blue on white
-        neo[50] = 1, 0, 0 # set pixel 50 to red
-        neo[60] = 0, 1, 0 # set pixel 60 to green
-        neo() # show()
-        for _ in range(10):
-            neo << 1 # left roll by 1, but not show() # type: ignore
-            sleep(0.5)
-            (~neo)() # invert colors and show()
-            neo *= 0.9 # multiply all led values with 0.9
-        for _ in range(10):
-            neo += np.array([0,0,0,0.1]) # increase white LED by 0.1
-            neo >>= 2 # right roll by 2 and show()
-            sleep(0.5)
-
-
-def GammaTest() -> None:
-    with RpiNeoPixelSPI(144, device=0, brightness=0.25, color_mode=ColorMode.HSV) as neo:
-        for i in range(neo.num_pixels):
-            v = i/(neo.num_pixels-1)
-            color = 1, 0, v
-            neo[i] = color
-        neo()
-
-
-def Rainbow():
-    from time import sleep
-    from colors import linear_gamma
-    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma, brightness=1) as neo:
-        neo.clear()() # clear() and show()
-        for i in range(neo.num_pixels):
-            v = i/(neo.num_pixels-1)
-            color = v, 1., 1.
-            neo[i] = color
-        while True:
-            neo >>= 1 # roll() and show()
-            sleep(0.02)
-
-
-if __name__ == "__main__":
-    class_test()
-    Rainbow()
-    # GammaTest()
