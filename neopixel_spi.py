@@ -74,7 +74,7 @@ class RpiNeoPixelSPI:
                 max_power: float = 0.0
                 ) -> None:
 
-        self.wats_per_led: float = 0.082
+        self.watts_per_led: np.ndarray = np.array([0.081, 0.081, 0.08, 0.09])
 
         self._pixel_order: PixelOrder = pixel_order
         self._color_mode: ColorMode = color_mode
@@ -175,14 +175,21 @@ class RpiNeoPixelSPI:
 
         rgb_buffer = self._pixel_buffer.copy()
 
-        # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8:
+        # Apply brightness and gamma correction
         rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
-        self._current_power = self.wats_per_led * np.sum(rgb_buffer) # get current power consumption
+
+        if self._has_W:
+            # get current power consumption
+            self._current_power = np.sum(self.watts_per_led * rgb_buffer)
+        else:
+            self._current_power = np.sum(self.watts_per_led[:3] * rgb_buffer)
+
         if (self._max_power > 1e-6) and (self._current_power > self._max_power):
             # Power consumption limiter
             rgb_buffer *= self._max_power/self._current_power
             self._current_power = self._max_power
 
+        # scale to [0, 255], and convert to uint8:
         rgb_buffer = np.clip(np.round(255 * rgb_buffer), 0, 255).astype(np.uint8)
         self._num_lit_pixels = np.count_nonzero(np.max(rgb_buffer, axis=1))
 

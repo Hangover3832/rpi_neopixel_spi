@@ -31,14 +31,15 @@ def class_test():
 
         neo.fill((1.0, 1.0, 1.0, 1.0))()
         print(f" Power at {neo.power_consumption:.1f} W")
-        sleep(5)
+        sleep(0.5)
         neo *= 0.5
         neo()
         print(f" Power at {neo.power_consumption:.1f} W")
+        sleep(0.5)
         neo *= 0.5
         neo()
         print(f" Power at {neo.power_consumption:.1f} W")
-        sleep(5)
+        sleep(0.5)
 
         neo[:] = (1,1,1,1)
         if neo().is_simulated:
@@ -77,16 +78,15 @@ def Raindrops():
         index = randint(0, strip.num_pixels-1)
         value = random(), 1.0, 1.0 # a random color at full saturation and intensity
         strip.set_value(index, value, color_mode=ColorMode.HSV)()
-        print(f", Number of lit LEDs: {strip.num_lit_pixels}")
         drop.interval = random()/5
 
     @Every.every(0.01)
     def decay(strip: RpiNeoPixelSPI):
-        # reduce all pixel values to 98%
+        # reduce all pixel values
         strip += -0.005
         strip()
 
-    with RpiNeoPixelSPI(144, gamma_func=linear_gamma) as neo:
+    with RpiNeoPixelSPI(144, max_power=2, gamma_func=default_gamma) as neo:
         while True:
             drop(neo)
             decay(neo)
@@ -96,6 +96,6 @@ def Raindrops():
 if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
-    class_test()
-    # Raindrops()
+    #class_test()
+    Raindrops()
     # Rainbow()
