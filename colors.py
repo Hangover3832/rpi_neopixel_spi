@@ -51,7 +51,7 @@ CRAZY_GAMMA = np.array([1.0, 0.0, 1.0])
 # dark pixels are bright, bright pixels are bright and middle pixels are dark ;-)
 
 
-def _poly_fit(values_out: np.ndarray) -> Poly:
+def create_gamma_function(values_out: np.ndarray) -> Poly:
     """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points.
     Args:
         values_out (np.ndarray): Array of output values for the polynomial fit.
@@ -64,12 +64,12 @@ def _poly_fit(values_out: np.ndarray) -> Poly:
     return Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
 
 
-custom_gamma =  _poly_fit(CUSTOM_GAMMA)
-default_gamma = _poly_fit(DEFAULT_GAMMA)
-srgb_gamma =    _poly_fit(SRGB_GAMMA)
-simple_gamma =  _poly_fit(SIMPLE_GAMMA)
-no_dark_gamma = _poly_fit(NO_DARK_GAMMA)
-crazy_gamma =   _poly_fit(CRAZY_GAMMA)
+custom_gamma =  create_gamma_function(CUSTOM_GAMMA)
+default_gamma = create_gamma_function(DEFAULT_GAMMA)
+srgb_gamma =    create_gamma_function(SRGB_GAMMA)
+simple_gamma =  create_gamma_function(SIMPLE_GAMMA)
+no_dark_gamma = create_gamma_function(NO_DARK_GAMMA)
+crazy_gamma =   create_gamma_function(CRAZY_GAMMA)
 square_gamma =  lambda x: np.square(x)
 linear_gamma =  lambda x: x
 inverse_gamma = lambda x: 1.0-x

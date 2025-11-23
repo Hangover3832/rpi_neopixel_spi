@@ -56,7 +56,6 @@ except:
             self.bits_per_word = 8
             self.no_cs = False
             self.pixel_order = pixel_order
-            self.message = "Neopixel sim"
 
         def open(self, bus: int = 0, device: int = 0) -> None:
             print(f"Dummy SPI open, {bus=}, {device=}")
@@ -78,8 +77,7 @@ except:
                 g, r, b = convert(bits[0:4]), convert(bits[4:8]), convert(bits[8:12])
                 w = convert(bits[12:16]) if bits.shape[0]>12 else 0
                 print(f"\033[48;2;{w};{w};{w}m", end='') # the background color simulates the white LED in a GRBW Neopixel
-                print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='') # print the color LED's
-            print(self.message, end="", flush=True)
+                print(f"\033[38;2;{r};{g};{b}m{self.LED_CHAR}\033[0m", end='', flush=True) # print the color LED's
 
 
     class OutputDevice(DummyRPIDev):

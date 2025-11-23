@@ -1,21 +1,22 @@
+from time import sleep
 import numpy as np
 from neopixel_spi import RpiNeoPixelSPI
-from colors import ColorMode, PixelOrder, linear_gamma, default_gamma
+from colors import ColorMode, PixelOrder, linear_gamma, default_gamma, create_gamma_function
+from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
+from random import random, randint
 
 
 def class_test():
-    from time import sleep
-
-    with RpiNeoPixelSPI(100, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1, gamma_func=linear_gamma) as neo:
+    with RpiNeoPixelSPI(60, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1, gamma_func=linear_gamma, max_power=10) as neo:
         neo.clear()
-        neo.set_value([10, 20, 70], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 70 to red
+        neo.set_value([10, 20, 50], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 70 to red
         neo[30:40] = 0, 0, 1, 1 # set pixels 30..39 to blue on white
         neo *= np.array([1.0, 1.0, 1.0, 0.75]) # reduce all white LEDs brithness to 75%
         neo[50] = 1.0 # This sets only the white LED on a RGBW Neopixel
         neo[50] = 1, 0, 0 # set pixel 50 to red, keep the white LED as is
-        neo[60] = 0, 1, 0, 0 # set pixel 60 to green
         neo() # show()
         sleep(0.2)
+
         for _ in range(10):
             neo << 1 # left roll by 1, but not show() # type: ignore
             sleep(0.1)
@@ -25,80 +26,76 @@ def class_test():
             neo += np.array([0.0, 0.0, 0.0, 0.1]) # increase all white LEDs by 0.1
             neo >>= 2 # right roll by 2 and show()
             sleep(0.1)
+
+        neo.gamma_func = create_gamma_function(np.array([0.0, 0.75, 1.0]))
+
         neo.fill((1.0, 1.0, 1.0, 1.0))()
-        print(f" Power at {neo.power_consumption*100:.1f} %")
+        print(f" Power at {neo.power_consumption:.1f} W")
+        sleep(5)
         neo *= 0.5
         neo()
-        print(f" Power at {neo.power_consumption*100:.1f} %")
+        print(f" Power at {neo.power_consumption:.1f} W")
         neo *= 0.5
         neo()
-        print(f" Power at {neo.power_consumption*100:.1f} %")
+        print(f" Power at {neo.power_consumption:.1f} W")
+        sleep(5)
+
+        neo[:] = (1,1,1,1)
+        if neo().is_simulated:
+            print("full power")
         neo.clear()()
 
 
 def GammaTest() -> None:
-    with RpiNeoPixelSPI(100, device=0, color_mode=ColorMode.HSV, pixel_order=PixelOrder.GRB) as neo:
-        for i in range(neo.num_pixels):
-            v = i/(neo.num_pixels-1)
-            color = 1, 0, v
-            neo[i] = color
-        neo()
-        neo.clear()()
+    with RpiNeoPixelSPI(100, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
+        for i in neo:
+            neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
+        if neo().is_simulated:
+            print()
+        for hue in range(0, 361, 30):
+            for i in neo:
+                neo[i] = hue/360, 1.0, i/(neo.num_pixels-1)
+            neo()
+            print(f"Hue={hue/360:.2f}")
 
 
 def Rainbow():
-    from time import sleep
-    from colors import linear_gamma
-    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma, max_power=0.1) as neo:
-        for i in range(neo.num_pixels):
-            v = i/(neo.num_pixels-1)
-            color = v, 1., 1.
-            neo[i] = color
-        neo()
-        while True:
-            if hasattr(neo._spi, 'IS_DUMMY_DEVICE'):
-                neo._spi.message = f" {neo.num_lit_pixels} lit LEDs, Power at {neo.power_consumption*100:.1f}%"
+    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
 
-            neo >>= 1 # roll() and show()
-            
+        for i in neo:
+            # Create a rainbow pattern in the default HSV space
+            neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
+        while True:
+            neo >>= 1 # roll the pattern and show()
             sleep(0.02)
 
 
 def Raindrops():
-    from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
-    from random import random, randint
-    from time import sleep
-
     @Every.every(0.1)
     def drop(strip: RpiNeoPixelSPI):
-        # place a random colored pixel at a random location
+        # place a random colored pixel at a random location in a random interval
         index = randint(0, strip.num_pixels-1)
-        value = random(), 1.0, 1.0
+        value = random(), 1.0, 1.0 # a random color at full saturation and intensity
         strip.set_value(index, value, color_mode=ColorMode.HSV)()
+        print(f", Number of lit LEDs: {strip.num_lit_pixels}")
+        drop.interval = random()/5
 
     @Every.every(0.01)
     def decay(strip: RpiNeoPixelSPI):
         # reduce all pixel values to 98%
-        strip *= 0.98
+        strip += -0.005
         strip()
 
-    @Every.every(5.0)
-    def print_num(num: int):
-        print(f"Number of lit LEDs: {num}")
-
- 
-    with RpiNeoPixelSPI(144, gamma_func=linear_gamma, max_power=0.25) as neo:
+    with RpiNeoPixelSPI(144, gamma_func=linear_gamma) as neo:
         while True:
-            if hasattr(neo._spi, 'IS_DUMMY_DEVICE'):
-                neo._spi.message = f" {neo.num_lit_pixels} lit LEDs, Power at {neo.power_consumption*100:.1f}%"
             drop(neo)
             decay(neo)
-            # sleep(0.001)
+            sleep(0.001)
 
 
 if __name__ == "__main__":
-    RpiNeoPixelSPI(320).clear()
+    RpiNeoPixelSPI(320).clear()()
     GammaTest()
     class_test()
-    Raindrops()
-    Rainbow()
+    # Raindrops()
+    # Rainbow()

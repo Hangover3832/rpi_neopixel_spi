@@ -23,19 +23,31 @@ class RpiNeoPixelSPI:
     Args:
         num_pixels (int): Number of NeoPixel LEDs in the strip.
         device (int, optional): SPI device number. Defaults to 0.
-            device=0 -> /dev/spidev0.0 uses BCM pins 8 (CE0), 9 (MISO), 10 (MOSI), 11 (SCLK)
-            device=1 -> /dev/spidev0.1 uses BCM pins 7 (CE1), 9 (MISO), 10 (MOSI), 11 (SCLK)
+            - device=0 -> /dev/spidev0.0 uses BCM pins 8 (CE0), 9 (MISO), 10 (MOSI), 11 (SCLK)
+            - device=1 -> /dev/spidev0.1 uses BCM pins 7 (CE1), 9 (MISO), 10 (MOSI), 11 (SCLK)
         gamma_func (Callable, optional): Function to apply gamma correction. Defaults to default_gamma.
         color_mode (ColorMode, optional): Color mode for input values. Options are RGB, HSV, YIQ, HLS. Defaults to HSV.
         brightness (float, optional): Brightness level (0.0 to 1.0). Defaults to 1.0.
         auto_write (bool, optional): If True, updates the LEDs automatically on value change. Defaults to False.
         pixel_order (PixelOrder, optional): Order of color channels in the NeoPixel (e.g., GRB, RGBW). Defaults to GRB.
         clock_rate (Spi_Clock, optional): SPI clock rate in Hz. Defaults to CLOCK_800KHZ.
+        custom_cs (int, optional): Custom chip select pin.
+        max_power (float, optional): Maximum power in watts. The strip is dimmed automatically if this limit is reached.
+            Set this value to 0 to disable power control.
+            The calculation of the power consumtion can be adjusted with the `wats_per_led` attribute.
 
     Clock Rates:
         - Spi_Clock.CLOCK_400KHZ: Standard rate for WS2812 pixels
         - Spi_Clock.CLOCK_800KHZ: High-speed rate for WS2812B pixels
         - Spi_Clock.CLOCK_1200KHZ: Maximum rate for some pixels
+
+    Example:
+        ```
+        # Set all pixel to red (HSV mode by default)
+        neo = RpiNeoPixelSPI(50)
+        neo[:] = (0.0, 1.0, 1.0))
+        neo()
+        ```
     """
 
     COLOR_RGB_BLACK     = np.array([0., 0., 0.])
@@ -59,16 +71,18 @@ class RpiNeoPixelSPI:
                 pixel_order: PixelOrder = PixelOrder.GRB,
                 clock_rate: Spi_Clock = Spi_Clock.CLOCK_800KHZ,
                 custom_cs: int | None = None,
-                max_power: float = 1.0
+                max_power: float = 0.0
                 ) -> None:
 
-        self.__pixel_order: PixelOrder = pixel_order
-        self.__color_mode: ColorMode = color_mode
-        self.__auto_write = auto_write
+        self.wats_per_led: float = 0.082
+
+        self._pixel_order: PixelOrder = pixel_order
+        self._color_mode: ColorMode = color_mode
+        self._auto_write = auto_write
         self._num_lit_pixels: int = 0
         self._current_power: float = 0.0
-        self._max_power: float = float(np.clip(max_power, 0.0, 1.0))
-        self.wats_per_led: float = 0.08
+        self._max_power: float = max_power
+        self._index: int = 0
 
         if custom_cs is not None: # use a custom chip select (cs) BCM pin
             self._cs = OutputDevice(custom_cs, active_high=False, initial_value=True)
@@ -92,22 +106,22 @@ class RpiNeoPixelSPI:
         except: 
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
-        self.__brightness: float = float(np.clip(brightness, 0., 1.))
-        self.__gamma_func: Callable = gamma_func or default_gamma
+        self._brightness: float = float(np.clip(brightness, 0., 1.))
+        self._gamma_func: Callable = gamma_func or default_gamma
 
-        if (num_led := len(self.__pixel_order.name)) == 4:
+        if (num_led := len(self._pixel_order.name)) == 4:
             self._double_bits_per_pixel = 16
-            self.__msb_mask = 0x80000000
-            self.__c_mask = 0xFFFFFFFF
+            self._msb_mask = 0x80000000
+            self._c_mask = 0xFFFFFFFF
         else:
             self._double_bits_per_pixel = 12
-            self.__msb_mask = 0x800000
-            self.__c_mask = 0xFFFFFF
+            self._msb_mask = 0x800000
+            self._c_mask = 0xFFFFFF
 
-        self.__pixel_buffer = np.zeros((num_pixels, num_led), dtype=np.float32)
+        self._pixel_buffer = np.zeros((num_pixels, num_led), dtype=np.float32)
 
         # Pre-allocate buffer for the encoded bits
-        self.__spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
+        self._spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
 
 
     def _from_RGB(self, rgb: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
@@ -120,7 +134,7 @@ class RpiNeoPixelSPI:
             ColorMode.HSV: np.array(rgb_to_hsv(*rgb[0:3])),
             ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[0:3])),
             ColorMode.HLS: np.array(rgb_to_hls(*rgb[0:3]))
-        }[color_mode or self.__color_mode]
+        }[color_mode or self._color_mode]
 
         return np.append(result, rgb[3]) if rgb.shape[0] > 3 and self._has_W else result
 
@@ -135,7 +149,7 @@ class RpiNeoPixelSPI:
             ColorMode.HSV: np.array(hsv_to_rgb(*value[0:3])),
             ColorMode.YIQ: np.array(yiq_to_rgb(*value[0:3])),
             ColorMode.HLS: np.array(hls_to_rgb(*value[0:3]))
-        }[color_mode or self.__color_mode]
+        }[color_mode or self._color_mode]
 
         return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
 
@@ -145,7 +159,7 @@ class RpiNeoPixelSPI:
 
         assert value.max()<=1.0 and value.min()>= 0.0
 
-        if (color_mode := color_mode or self.__color_mode) == ColorMode.HSV:
+        if (color_mode := color_mode or self._color_mode) == ColorMode.HSV:
             return value
 
         rgb = self._to_RGB(value, color_mode)
@@ -154,21 +168,17 @@ class RpiNeoPixelSPI:
         return np.append(hsv, value[3]) if value.shape[0] > 3 and self._has_W else hsv
 
 
-    def _write_buffer(self, a_rgb_buffer: np.ndarray | None = None) -> None:
+    def _write_buffer(self) -> None:
         """
         Write pixel data to NeoPixels using SPI protocol.
-        
-        Args:
-            buffer: Optional numpy array containing pixel data. 
-                   If None, uses internal pixel buffer.
         """
 
-        rgb_buffer = a_rgb_buffer if a_rgb_buffer is not None else self.__pixel_buffer.copy()
+        rgb_buffer = self._pixel_buffer.copy()
 
         # Apply brightness and gamma correction, scale to [0, 255], and convert to uint8:
-        rgb_buffer = self.__gamma_func(rgb_buffer * self.__brightness)
-        self._current_power = np.sum(rgb_buffer)/rgb_buffer.size # get current power consumption
-        if (self._max_power > 0) and (self._current_power > self._max_power):
+        rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
+        self._current_power = self.wats_per_led * np.sum(rgb_buffer) # get current power consumption
+        if (self._max_power > 1e-6) and (self._current_power > self._max_power):
             # Power consumption limiter
             rgb_buffer *= self._max_power/self._current_power
             self._current_power = self._max_power
@@ -179,7 +189,7 @@ class RpiNeoPixelSPI:
         # rows are now pixels, columns are R,G,B,(W)
         # rearange the rgb_buffer to the correct pixel order
         # Here, we allow every possible pixel order with R,G,B and optional W
-        rgb_buffer = rgb_buffer[:, [self.__pixel_order.name.index(c) for c in 'RGBW' if c in self.__pixel_order.name]]
+        rgb_buffer = rgb_buffer[:, [self._pixel_order.name.index(c) for c in 'RGBW' if c in self._pixel_order.name]]
 
         # Convert [r, g, b, (w)] uint8 to a single uint32:
         if self._has_W:
@@ -192,17 +202,17 @@ class RpiNeoPixelSPI:
 
         # shift out 2 bits of each pixel and encode them to a byte for SPI transmission:
         for i in range(self._double_bits_per_pixel):
-            bit1 = (rgb_buffer & self.__msb_mask).astype(bool)
-            rgb_buffer = ((rgb_buffer << 1) & self.__c_mask).astype(np.uint32)
-            bit2 = (rgb_buffer & self.__msb_mask).astype(bool) 
-            rgb_buffer = ((rgb_buffer << 1) & self.__c_mask).astype(np.uint32)
+            bit1 = (rgb_buffer & self._msb_mask).astype(bool)
+            rgb_buffer = ((rgb_buffer << 1) & self._c_mask).astype(np.uint32)
+            bit2 = (rgb_buffer & self._msb_mask).astype(bool) 
+            rgb_buffer = ((rgb_buffer << 1) & self._c_mask).astype(np.uint32)
             # encode 2 pixel bits into 1 SPI byte:
-            self.__spi_buffer[i] = (np.where(bit1, self.SPI_HIGH_BIT, self.SPI_LOW_BIT) | np.where(bit2, self.SPI_HIGH_BIT2, self.SPI_LOW_BIT2)).astype(np.uint8)
+            self._spi_buffer[i] = (np.where(bit1, self.SPI_HIGH_BIT, self.SPI_LOW_BIT) | np.where(bit2, self.SPI_HIGH_BIT2, self.SPI_LOW_BIT2)).astype(np.uint8)
 
         # Send data to device:
         if self._cs is not None:
             self._cs.on() # chip enable
-        self._spi.writebytes2(self.__spi_buffer.T.flatten()) # type: ignore
+        self._spi.writebytes2(self._spi_buffer.T.flatten()) # type: ignore
         if self._cs is not None:
             self._cs.off() # chip disable
 
@@ -213,26 +223,26 @@ class RpiNeoPixelSPI:
         self.set_value(index, value)
 
     def __getitem__(self, index: int) -> np.ndarray:
-        return self._from_RGB(self.__pixel_buffer[index])
+        return self._from_RGB(self._pixel_buffer[index])
     
     def __len__(self) -> int:
         """Get the number of pixels in the strip."""
-        return self.__pixel_buffer.shape[0]
+        return self._pixel_buffer.shape[0]
 
 
     def _write_value_to_buffer(self, index: PixelIndex, value: PixelValue) -> None:
         
         if isinstance(value, (float, int)) and self._has_W:
             # a simple number applies to the white pixel only if abailable
-            self.__pixel_buffer[index, 3] = value
+            self._pixel_buffer[index, 3] = value
             return
 
         if (value := np.array(value)).shape[0] == 3 and self._has_W:
             # if RGB is passed but the stripe has RGBW, only store RGB and keep W as is
-            self.__pixel_buffer[index, :3] = value
+            self._pixel_buffer[index, :3] = value
             return
 
-        self.__pixel_buffer[index] = value[:4]
+        self._pixel_buffer[index] = value[:4]
 
 
     def set_value(self, index: PixelIndex, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
@@ -243,7 +253,7 @@ class RpiNeoPixelSPI:
             rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
             self._write_value_to_buffer(index, rgb)
 
-        return self.show() if self.__auto_write else self
+        return self.show() if self._auto_write else self
 
 
     def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
@@ -252,13 +262,13 @@ class RpiNeoPixelSPI:
 
     def __iadd__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
         """Add value to the pixel buffer in RGB space, e.g. pixels += 0.1"""
-        self.__pixel_buffer =  np.clip(self.__pixel_buffer + value, 0., 1.)
-        return self.show() if self.__auto_write else self
+        self._pixel_buffer =  np.clip(self._pixel_buffer + value, 0., 1.)
+        return self.show() if self._auto_write else self
 
     def __imul__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
         """Multiply value with the pixel buffer in RGB space, e.g. neo *= 0.9"""
-        self.__pixel_buffer =  np.clip(self.__pixel_buffer * value, 0., 1.)
-        return self.show() if self.__auto_write else self
+        self._pixel_buffer =  np.clip(self._pixel_buffer * value, 0., 1.)
+        return self.show() if self._auto_write else self
 
     def __lshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the left by amount, e.g. `pixels << 1`"""
@@ -280,7 +290,7 @@ class RpiNeoPixelSPI:
     
     def __invert__(self)-> 'RpiNeoPixelSPI':
         """Invert all colors of all pixels, e.g. `~pixels` """
-        self.__pixel_buffer = 1.0 - self.__pixel_buffer
+        self._pixel_buffer = 1.0 - self._pixel_buffer
         return self.show() if self.auto_write else self
 
 
@@ -305,19 +315,19 @@ class RpiNeoPixelSPI:
         """
 
         if value is None:
-            self.__pixel_buffer = np.roll(self.__pixel_buffer, shift, axis=0)
+            self._pixel_buffer = np.roll(self._pixel_buffer, shift, axis=0)
         else:
             value = np.array(value)
 
             if shift > 0:
-                self.__pixel_buffer[shift:] = self.__pixel_buffer[:-shift]
+                self._pixel_buffer[shift:] = self._pixel_buffer[:-shift]
                 self._write_value_to_buffer(slice(None,shift), value)
 
             elif shift < 0:
-                self.__pixel_buffer[:shift] = self.__pixel_buffer[-shift:]
+                self._pixel_buffer[:shift] = self._pixel_buffer[-shift:]
                 self._write_value_to_buffer(slice(shift, None), value)
 
-        return self.show() if self.__auto_write else self
+        return self.show() if self._auto_write else self
 
 
     def __call__(self,
@@ -334,6 +344,17 @@ class RpiNeoPixelSPI:
         return self.set_value(indexes, value)
 
 
+    def __iter__(self):
+        return self
+
+    def __next__(self) -> int:
+        if self._index >= len(self):
+            self._index = 0
+            raise StopIteration
+        self._index += 1
+        return self._index - 1
+
+
     @property
     def blank(self) -> np.ndarray:
         """Get a black color value appropriate for the pixel type (RGB or RGBW)."""
@@ -341,45 +362,45 @@ class RpiNeoPixelSPI:
 
     @property
     def _has_W(self) -> bool:
-        return self.__pixel_buffer.shape[1] > 3
+        return self._pixel_buffer.shape[1] > 3
 
     @property
     def gamma_func(self) -> Callable[[float], float]:
-        return self.__gamma_func
+        return self._gamma_func
 
     @gamma_func.setter
     def gamma_func(self, new_gamma: Callable[[float], float]) -> None:
-        self.__gamma_func = new_gamma
-        if self.__auto_write:
+        self._gamma_func = new_gamma
+        if self._auto_write:
             self.show()
 
     @property 
     def color_mode(self) -> ColorMode:
-        return self.__color_mode
+        return self._color_mode
 
     @color_mode.setter
     def color_mode(self, new_mode: ColorMode) -> None:
-        self.__color_mode = new_mode
+        self._color_mode = new_mode
 
     @property
     def brightness(self) -> float:
-        return self.__brightness
+        return self._brightness
 
     @brightness.setter
     def brightness(self, value: float) -> None:
-        self.__brightness = float(np.clip(value, 0.0, 1.0))
-        if self.__auto_write:
+        self._brightness = float(np.clip(value, 0.0, 1.0))
+        if self._auto_write:
             self.show()
 
     @property
     def auto_write(self) -> bool:
-        return self.__auto_write
+        return self._auto_write
 
     @auto_write.setter
     def auto_write(self, value:bool) -> None:
-        if value and not self.__auto_write:
+        if value and not self._auto_write:
             self.show()
-        self.__auto_write = value
+        self._auto_write = value
 
     @property
     def CS(self) -> OutputDevice | None:
@@ -406,6 +427,10 @@ class RpiNeoPixelSPI:
     def max_power(self, max_power: float) -> None:
         self._max_power = float(np.clip(max_power, 0.0, 1.0))
         self._write_buffer()
+
+    @property
+    def is_simulated(self) -> bool:
+        return hasattr(self._spi, "IS_DUMMY_DEVICE")
 
 
     def cleanup(self) -> None:

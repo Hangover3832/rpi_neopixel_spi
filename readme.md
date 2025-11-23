@@ -16,31 +16,32 @@ This Python library provides an optimized SPI driver for controlling WS2812/SK68
   - Configurable pixel order to match different LED types
 
 ### Color Processing
+
+Uses a polynomial regression gamma calculation.
+
 - **Built-in Gamma Correction**:
   - Linear (no correction)
-  - Square gamma
   - Custom gamma interpolation (see colors.py)
   - Multiple pre-defined gamma curves:
     - Default gamma (18% middle grey)
     - sRGB gamma (21.4% middle grey)
     - Simple gamma
-    - Custom gamma curves
+    - Square gamma
 
 ### Performance Features
 - Optimized SPI buffer encoding
 - Multiple clock rates (400KHz, 800KHz, 1200KHz)
 - Efficient bit-packing for reduced memory usage
-- Support for up to 320 LEDs in a single buffer
+- Support for up to 320 LEDs on the default spi buffer size.
 
 ### Additional Features
 - Brightness control
 - Auto-write mode
-- Context manager support
-- Clean shutdown with automatic LED clearing
+- Context manager support for a clean shutdown
 - Custom chip select pin (BCM pin mode)
 - Use operators for pixel manipulation and other effects
-- Neopixel stripe simulation in the console for on a non Rapberry Pi system
-- Power limiter. Limit the total power consumption of the whole stripe. The brithness will automatically reduce if neccesary.
+- A Neopixel stripe will be automatically simulated in the console on a non Rapberry Pi system
+- Power control. Limit the total power consumption of the whole stripe. The brigthness will automatically reduce if neccesary. Note that the accuracy of this feature is quite limitted.
 
 ## Installation
 
@@ -67,7 +68,7 @@ pip3 install -r requirements.txt
 ### Basic Examples
 ```python
 import numpy as np
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from neopixel_spi import RpiNeoPixelSPI
 from colors import ColorMode
 
 # Create a strip of 60 LEDs
@@ -93,29 +94,32 @@ with RpiNeoPixelSPI(60, device=0, brightness=1.0, color_mode=ColorMode.RGB) as s
     strip.roll(shift=1, value=(1.0, 1.0, 0.0))()
 ```
 
-### Rainbow Effect
+### Rainbow Effect With Output Power Control.
+
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from neopixel_spi import RpiNeoPixelSPI
 from colors import ColorMode
 from time import sleep
 
 def rainbow_cycle(strip):
     # Create rainbow pattern
-    for i in range(strip.num_pixels):
+    for i in strip:
         hue = i / strip.num_pixels
         strip[i] = (hue, 1.0, 1.0)
 
     # Rotate colors
     while True:
-        strip.roll()() # Shift all colors one pixel and update
+        strip >>= 1 # Shift all colors one pixel and update
         sleep(0.05)
 
-# Run rainbow effect on 60 LEDs with half brithness
+# Run rainbow effect on 60 LEDs with a maximum power draw of ~5 Watts
 with RpiNeoPixelSPI(60, 
         brightness=1.0, 
         color_mode=ColorMode.HSV,
-        max_power=0.25, # Set the power limit to 25%
+        max_power=5.0, # Set the power limit to 5W
         ) as strip:
+
+    strip.watts_per_led = 0.08 # Watts per LED per channel
     rainbow_cycle(strip)
 ```
 
@@ -127,7 +131,7 @@ with RpiNeoPixelSPI(60, custom_cs=12) as strip:
 
 ### Using Different Color Modes
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from neopixel_spi import RpiNeoPixelSPI
 from colors import ColorMode
 
 with RpiNeoPixelSPI(60) as strip:
@@ -150,7 +154,7 @@ with RpiNeoPixelSPI(60) as strip:
 
 ### Using operators
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
+from neopixel_spi import RpiNeoPixelSPI
 
 with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
     # Make all leds white:
@@ -180,15 +184,24 @@ with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
 ### Using Gamma Correction
 
 ```python
-from rpi_neopixel_spi import RpiNeoPixelSPI
-from colors import default_gamma, square_gamma
+import numpy as np
+from neopixel_spi import RpiNeoPixelSPI
+from colors import square_gamma, create_gamma_funtion
 
 # Using square gamma correction
 with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
     strip.fill((0.5, 0.5, 0.5))()  # Set half brightness and show()
 
-# Using default gamma correction
-with RpiNeoPixelSPI(60, gamma_func=default_gamma) as strip:
+# Use custom gamma correction
+MY_GAMMA = np.array([
+    0.0, # value for 0% brithness
+    0.7, # value for 50% brigthness
+    1.0  # value for 100% brightness
+])
+
+my_gamma_func: Callable[[float], float] = create_gamma_function(MY_GAMMA)
+
+with RpiNeoPixelSPI(60, gamma_func=my_gamma_func) as strip:
     strip.fill((0.5, 0.5, 0.5))()  # Set more accurate half brightness white and show()
 ```
 
