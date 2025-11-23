@@ -12,10 +12,12 @@ def class_test():
         neo.set_value([10, 20, 50], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 70 to red
         neo[30:40] = 0, 0, 1, 1 # set pixels 30..39 to blue on white
         neo *= np.array([1.0, 1.0, 1.0, 0.75]) # reduce all white LEDs brithness to 75%
-        neo[50] = 1.0 # This sets only the white LED on a RGBW Neopixel
-        neo[50] = 1, 0, 0 # set pixel 50 to red, keep the white LED as is
+        neo[45] = 1.0 # This sets only the white LED on a RGBW Neopixel
+        neo[45] = 1, 0, 0 # set pixel to red, keep the white LED as is
+        neo[:10] = 0, 1, 1 # set first 10 pixels to aqua
+        neo[-10:] = 1, 1, 0 # set last 10 pixels to yellow
         neo() # show()
-        sleep(0.2)
+        sleep(1)
 
         for _ in range(10):
             neo << 1 # left roll by 1, but not show() # type: ignore
@@ -26,8 +28,6 @@ def class_test():
             neo += np.array([0.0, 0.0, 0.0, 0.1]) # increase all white LEDs by 0.1
             neo >>= 2 # right roll by 2 and show()
             sleep(0.1)
-
-        neo.gamma_func = create_gamma_function(np.array([0.0, 0.75, 1.0]))
 
         neo.fill((1.0, 1.0, 1.0, 1.0))()
         print(f" Power at {neo.power_consumption:.1f} W")
@@ -75,14 +75,16 @@ def Raindrops():
     @Every.every(0.1)
     def drop(strip: RpiNeoPixelSPI):
         # place a random colored pixel at a random location in a random interval
-        index = randint(0, strip.num_pixels-1)
+        index = randint(0, strip.num_pixels-1) # random position
         value = random(), 1.0, 1.0 # a random color at full saturation and intensity
         strip.set_value(index, value, color_mode=ColorMode.HSV)()
         drop.interval = random()/5
+        if strip.is_simulated:
+            print()
 
     @Every.every(0.01)
     def decay(strip: RpiNeoPixelSPI):
-        # reduce all pixel values
+        # reduce all pixel values to fade them out
         strip += -0.005
         strip()
 
@@ -96,6 +98,6 @@ def Raindrops():
 if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
-    #class_test()
-    Raindrops()
-    # Rainbow()
+    class_test()
+    # Raindrops()
+    Rainbow()

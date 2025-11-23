@@ -100,12 +100,15 @@ with RpiNeoPixelSPI(60, device=0, brightness=1.0, color_mode=ColorMode.RGB) as s
 from neopixel_spi import RpiNeoPixelSPI
 from colors import ColorMode
 from time import sleep
+import numpy as np
 
 def rainbow_cycle(strip):
-    # Create rainbow pattern
+    # Create rainbow pattern (HSV mode)
     for i in strip:
         hue = i / strip.num_pixels
-        strip[i] = (hue, 1.0, 1.0)
+        saturation = 1.0
+        value = 1.0
+        strip[i] = (hue, saturation, value)
 
     # Rotate colors
     while True:
@@ -119,7 +122,7 @@ with RpiNeoPixelSPI(60,
         max_power=5.0, # Set the power limit to 5W
         ) as strip:
 
-    strip.watts_per_led = 0.08 # Watts per LED per channel
+    strip.watts_per_led = np.array([0.082, 0.081, 0.079, 0.]) # Example, Watts per LED [R, G, B, W]
     rainbow_cycle(strip)
 ```
 
@@ -136,6 +139,7 @@ from colors import ColorMode
 
 with RpiNeoPixelSPI(60) as strip:
     # RGB mode
+    strip.color_mode = ColorMode.RGB
     strip[0] = (1.0, 0.0, 0.0)  # Red
     
     # HSV mode (default)
@@ -150,6 +154,12 @@ with RpiNeoPixelSPI(60) as strip:
 
     # Set a YIQ value regardless of the current color mode & show()
     strip.set_value(3, (0.5, 0.5, 0.5), color_mode=ColorMode.YIQ)()
+
+    # Using sclicing, set all pixels half brightness
+    strip.color_mode = ColorMode.RGB
+    strip[:] = (0.5, 0.5, 0.5)
+    # and the last 10 pixels to aqua
+    strip[-10:] = (0.0, 1.0, 1.0)
 ```
 
 ### Using operators

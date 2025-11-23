@@ -178,8 +178,8 @@ class RpiNeoPixelSPI:
         # Apply brightness and gamma correction
         rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
 
+        # calculate power consumption
         if self._has_W:
-            # get current power consumption
             self._current_power = np.sum(self.watts_per_led * rgb_buffer)
         else:
             self._current_power = np.sum(self.watts_per_led[:3] * rgb_buffer)

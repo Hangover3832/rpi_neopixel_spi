@@ -11,7 +11,7 @@ class ColorMode(Enum):
 
 
 class PixelOrder(Enum):
-    """Any order of R, G, B and W is possible"""
+    """Any combination of R, G, B and W is possible"""
     RGB = auto()
     GRB = auto()
     RGBW = auto()
