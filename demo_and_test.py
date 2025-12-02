@@ -48,27 +48,40 @@ def class_test():
 
 
 def GammaTest() -> None:
-    with RpiNeoPixelSPI(100, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
+
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, gamma_func=default_gamma) as neo:
         for i in neo:
             neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
         if neo().is_simulated:
             print()
-        for hue in range(0, 361, 30):
-            for i in neo:
-                neo[i] = hue/360, 1.0, i/(neo.num_pixels-1)
-            neo()
-            print(f"Hue={hue/360:.2f}")
 
 
 def Rainbow():
-    with RpiNeoPixelSPI(144, pixel_order=PixelOrder.GRB, gamma_func=linear_gamma) as neo:
 
+    @Every.every(0.5)
+    def drop(neo: RpiNeoPixelSPI):
+        """Drop in some white pixels"""
+        neo[:3] = 1.0
+        drop.interval = random()
+
+    @Every.every(1)
+    def gap(neo:RpiNeoPixelSPI):
+        neo[:3] = 0,0,0,0
+        gap.interval = random()+0.5
+
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=0.25) as neo:
+        neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         for i in neo:
             # Create a rainbow pattern in the default HSV space
             neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
         while True:
+            drop(neo)
+            #gap(neo)
+            neo[-1] = 0.0
             neo >>= 1 # roll the pattern and show()
-            sleep(0.02)
+            
+            #decay(neo)
+            # sleep(random())
 
 
 def Raindrops():
@@ -76,8 +89,11 @@ def Raindrops():
     def drop(strip: RpiNeoPixelSPI):
         # place a random colored pixel at a random location in a random interval
         index = randint(0, strip.num_pixels-1) # random position
-        value = random(), 1.0, 1.0 # a random color at full saturation and intensity
-        strip.set_value(index, value, color_mode=ColorMode.HSV)()
+        hue = random() # a random color at full saturation and intensity
+        if random() > 0.75:
+            strip[index] = 1.0
+        else:
+            strip.set_value(index, (hue, 1.0, 1.0), color_mode=ColorMode.HSV)()
         drop.interval = random()/5
         if strip.is_simulated:
             print()
@@ -88,16 +104,24 @@ def Raindrops():
         strip += -0.005
         strip()
 
-    with RpiNeoPixelSPI(144, max_power=2, gamma_func=default_gamma) as neo:
+    with RpiNeoPixelSPI(150, max_power=5, pixel_order=PixelOrder.GRBW) as neo:
         while True:
             drop(neo)
             decay(neo)
             sleep(0.001)
 
 
+def power_measure():
+    with RpiNeoPixelSPI(10, pixel_order=PixelOrder.GRBW, color_mode=ColorMode.RGB) as neo:
+        neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
+        neo[:] = 1.0, 1.0, 1.0, 1.0
+        print(neo().power_consumption)
+
+
 if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
     class_test()
-    # Raindrops()
+    #Raindrops()
     Rainbow()
+    #power_measure()
