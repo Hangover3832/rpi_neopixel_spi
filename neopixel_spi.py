@@ -4,7 +4,6 @@ Author: AlexL
 License: MIT
 Github: https://github.com/Hangover3832/rpi_neopixel_spi
 """
-import math
 import numpy as np
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 from typing import Callable
@@ -64,7 +63,7 @@ class RpiNeoPixelSPI:
                 num_pixels: int,
                 *,
                 device: int = 0,
-                gamma_func: Callable | None = None,
+                gamma_func: Callable = default_gamma,
                 color_mode: ColorMode = ColorMode.HSV,
                 brightness: float = 1.0, 
                 auto_write: bool = False,
@@ -107,7 +106,7 @@ class RpiNeoPixelSPI:
             raise RuntimeError("Error: Could not open SPI device. Ensure SPI is enabled in raspi-config and the device number is correct.")
 
         self._brightness: float = float(np.clip(brightness, 0., 1.))
-        self._gamma_func: Callable = gamma_func or default_gamma
+        self._gamma_func: Callable = gamma_func
 
         if (num_led := len(self._pixel_order.name)) == 4:
             self._double_bits_per_pixel = 16

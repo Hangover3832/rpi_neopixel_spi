@@ -31,6 +31,10 @@ CUSTOM_GAMMA = np.array([
     1.0     # value for 100% brightness
 ]) # insert more values in between if desired
 
+LINEAR_GAMMA = np.array([0.0, 1.0])
+INVERSE_GAMMA = np.array([1.0, 0.0])
+SQUARE_GAMMA = np.array([0.0, 0.25, 1.0])
+
 SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
 """This is quite close to the square gamma where the middle grey is 25%"""
 
@@ -64,12 +68,43 @@ def create_gamma_function(values_out: np.ndarray) -> Poly:
     return Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
 
 
-custom_gamma =  create_gamma_function(CUSTOM_GAMMA)
 default_gamma = create_gamma_function(DEFAULT_GAMMA)
 srgb_gamma =    create_gamma_function(SRGB_GAMMA)
 simple_gamma =  create_gamma_function(SIMPLE_GAMMA)
 no_dark_gamma = create_gamma_function(NO_DARK_GAMMA)
 crazy_gamma =   create_gamma_function(CRAZY_GAMMA)
-square_gamma =  lambda x: np.square(x)
-linear_gamma =  lambda x: x
-inverse_gamma = lambda x: 1.0-x
+square_gamma =  create_gamma_function(SQUARE_GAMMA)
+linear_gamma =  create_gamma_function(LINEAR_GAMMA)
+inverse_gamma = create_gamma_function(INVERSE_GAMMA)
+custom_gamma =  create_gamma_function(CUSTOM_GAMMA)
+
+
+def plot_gamma_functions() -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib.axes._axes import Axes
+    from matplotlib.figure import Figure
+
+    x = np.linspace(0.0, 1.0, 25)
+    splt = plt.subplots()
+    fig: Figure = splt[0]
+    ax: Axes = splt[1]
+    ax.set(xlim=(0.0, 1.0), ylim=(0.0, 1.0))
+    ax.set_title("Gamma Functions")
+    ax.set_xlabel("Input Value")
+    ax.set_ylabel("LED Brightness")
+
+    ax.plot(x, default_gamma(x), linewidth=2.0, label='default_gamma')
+    ax.plot(x, srgb_gamma(x), linewidth=2.0, label='srgb_gamma')
+    ax.plot(x, simple_gamma(x), linewidth=2.0, label='simple_gamma')
+    ax.plot(x, no_dark_gamma(x), linewidth=2.0, label='no_dark_gamma')
+    ax.plot(x, crazy_gamma(x), linewidth=2.0, label='crazy_gamma')
+    ax.plot(x, square_gamma(x), linewidth=2.0, label='square_gamma')
+    ax.plot(x, linear_gamma(x), linewidth=2.0, label='linear_gamma')
+    ax.plot(x, inverse_gamma(x), linewidth=2.0, label='inverse_gamma')
+    ax.plot(x, custom_gamma(x), linewidth=2.0, label='custom_gamma')
+
+    fig.legend()
+    plt.show()
+
+if __name__ == '__main__':
+    plot_gamma_functions()

@@ -112,16 +112,17 @@ def Raindrops():
 
 
 def power_measure():
-    with RpiNeoPixelSPI(10, pixel_order=PixelOrder.GRBW, color_mode=ColorMode.RGB) as neo:
+    lin_gamma = create_gamma_function(np.array([0.0, 1.0]))
+    with RpiNeoPixelSPI(10, pixel_order=PixelOrder.GRBW, color_mode=ColorMode.RGB, gamma_func=lin_gamma) as neo:
         neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         neo[:] = 1.0, 1.0, 1.0, 1.0
-        print(neo().power_consumption)
+        print(f"{neo().power_consumption=}")
 
 
 if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
     class_test()
-    #Raindrops()
+    # Raindrops()
     Rainbow()
-    #power_measure()
+    # power_measure()
