@@ -107,7 +107,7 @@ class RpiNeoPixelSPI:
         self._brightness: float = float(np.clip(brightness, 0., 1.))
         self._gamma_func: Callable = gamma_func
 
-        if (num_led := len(self._pixel_order.name)) == 4:
+        if self._pixel_order.num == 4:
             self._double_bits_per_pixel = 16
             self._msb_mask = 0x80000000
             self._c_mask = 0xFFFFFFFF
@@ -116,7 +116,7 @@ class RpiNeoPixelSPI:
             self._msb_mask = 0x800000
             self._c_mask = 0xFFFFFF
 
-        self._pixel_buffer = np.zeros((num_pixels, num_led), dtype=np.float32)
+        self._pixel_buffer = np.zeros((num_pixels, self._pixel_order.num), dtype=np.float32)
 
         # Pre-allocate buffer for the encoded bits
         self._spi_buffer = np.zeros([self._double_bits_per_pixel, self.num_pixels], dtype=np.uint8)
@@ -129,7 +129,7 @@ class RpiNeoPixelSPI:
         Add a virtual 2 dimensional screen area to the Neopixel stripe.
         
         :param config: A 2-dimensional array that contains all the pixel indices that bild up the screen,
-        counting from the top left to the bottom right of the virtual screen.
+        mapping from the top left to the bottom right on the virtual screen.
         :type config: np.ndarray[[int, ...]]
         :returns: The index number of the newly created screen.
         :rtype: int
@@ -164,46 +164,21 @@ class RpiNeoPixelSPI:
     def _from_RGB(self, rgb: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from RGB to color_mode (or, if not provided, to the current color mode)"""
 
-        assert rgb.max()<=1.0 and rgb.min()>= 0.0
-
-        result = {
-            ColorMode.RGB: rgb[0:3],
-            ColorMode.HSV: np.array(rgb_to_hsv(*rgb[0:3])),
-            ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[0:3])),
-            ColorMode.HLS: np.array(rgb_to_hls(*rgb[0:3]))
-        }[color_mode or self._color_mode]
-
-
+        result = (color_mode or self.color_mode).from_rgb(rgb)
         return np.append(result, rgb[3]) if rgb.shape[0] > 3 and self._has_W else result
 
 
     def _to_RGB(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to RGB"""
 
-        assert value.max()<=1.0 and value.min()>= 0.0
-
-        result = {
-            ColorMode.RGB: value[0:3],
-            ColorMode.HSV: np.array(hsv_to_rgb(*value[0:3])),
-            ColorMode.YIQ: np.array(yiq_to_rgb(*value[0:3])),
-            ColorMode.HLS: np.array(hls_to_rgb(*value[0:3]))
-        }[color_mode or self._color_mode]
-
+        result = (color_mode or self.color_mode).to_rgb(value)
         return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
-
 
     def _to_HSV(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to HSV"""
 
-        assert value.max()<=1.0 and value.min()>= 0.0
-
-        if (color_mode := color_mode or self._color_mode) == ColorMode.HSV:
-            return value
-
-        rgb = self._to_RGB(value, color_mode)
-        hsv = np.array(rgb_to_hsv(*rgb[0:3]))
-
-        return np.append(hsv, value[3]) if value.shape[0] > 3 and self._has_W else hsv
+        result = (color_mode or self._color_mode).to_hsv(value)
+        return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
 
 
     def _write_buffer(self) -> None:
@@ -215,10 +190,8 @@ class RpiNeoPixelSPI:
         rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
 
         # calculate power consumption
-        if self._has_W:
-            self._current_power = np.sum(self.watts_per_led * rgb_buffer)  
-        else: 
-            np.sum(self.watts_per_led[:3] * rgb_buffer) # watts_per_led might contain 4 values RGBW
+        watts = self.watts_per_led if self._has_W else self.watts_per_led[:3]
+        self._current_power = np.sum(watts * rgb_buffer)  
 
         # Power consumption limiter
         if (self._max_power > 1e-6) and (self._current_power > self._max_power):
@@ -278,14 +251,14 @@ class RpiNeoPixelSPI:
         if isinstance(value, (float, int)):
             # a simple number applies to the white pixel only if available
             if self._has_W:
-                self._pixel_buffer[index, 3] = value
+                self._pixel_buffer[index, 3] = float(np.clip(value, 0.0, 1.0))
                 return
             else:
                 raise ValueError("Cannot set white LED on non RGBW Neopixel")
 
         if (value := np.array(value)).shape[0] == 3:
             # if RGB is passed but the stripe has RGBW, only store RGB and keep W as is
-            self._pixel_buffer[index, :3] = value
+            self._pixel_buffer[index, :3] = np.clip(value, 0.0, 1.0)
             return
 
         self._pixel_buffer[index] = value[:4]
@@ -295,9 +268,9 @@ class RpiNeoPixelSPI:
         """Set pixel value at index, use color_mode if specified else use the current color mode"""
 
         if isinstance(value, (float, int)):
-            self._write_value_to_buffer(index, float(np.clip(value, 0.0, 1.0)))
+            self._write_value_to_buffer(index, value)
         else:
-            rgb = self._to_RGB(np.clip(value, 0., 1.), color_mode=color_mode)
+            rgb = self._to_RGB(np.clip(np.array(value), 0.0, 1.0), color_mode=color_mode)
             self._write_value_to_buffer(index, rgb)
 
         return self.show() if self._auto_write else self

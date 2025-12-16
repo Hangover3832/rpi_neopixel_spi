@@ -1,9 +1,49 @@
+from matplotlib.colors import to_rgb
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
-# from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
+from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 
 class ColorMode(Enum):
+
+    # All color mode conversions from_rgb and to_rgb are available in the colorsys module
+    def from_rgb(self, rgb: np.ndarray) -> np.ndarray:
+        assert rgb.max()<=1.0 and rgb.min()>= 0.0
+        return {
+            ColorMode.RGB: rgb[0:3],
+            ColorMode.HSV: np.array(rgb_to_hsv(*rgb[0:3])),
+            ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[0:3])),
+            ColorMode.HLS: np.array(rgb_to_hls(*rgb[0:3]))
+        }[self]
+
+    def to_rgb(self, value:np.ndarray) -> np.ndarray:
+        assert value.max()<=1.0 and value.min()>= 0.0
+        return {
+            ColorMode.RGB: value[0:3],
+            ColorMode.HSV: np.array(hsv_to_rgb(*value[0:3])),
+            ColorMode.YIQ: np.array(yiq_to_rgb(*value[0:3])),
+            ColorMode.HLS: np.array(hls_to_rgb(*value[0:3]))
+        }[self]
+    
+    # Define all the missing color mode conversion methods via rgb:
+    def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
+        return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(*hsv[0:3])))
+
+    def to_hsv(self, value:np.ndarray) -> np.ndarray:
+        return value if self == ColorMode.HSV else np.array(rgb_to_hsv(*self.to_rgb(value)))
+
+    def from_yiq(self, yiq:np.ndarray) -> np.ndarray:
+        return yiq if self == ColorMode.YIQ else self.from_rgb(np.array(yiq_to_rgb(*yiq[0:3])))
+
+    def to_yiq(self, value:np.ndarray) -> np.ndarray:
+        return value if self == ColorMode.YIQ else np.array(rgb_to_yiq(*self.to_rgb(value)))
+
+    def from_hls(self, hls:np.ndarray) -> np.ndarray:
+        return hls if self == ColorMode.HLS else self.from_rgb(np.array(hls_to_rgb(*hls[0:3])))
+
+    def to_hls(self, value:np.ndarray) -> np.ndarray:
+        return value if self == ColorMode.HLS else np.array(rgb_to_hls(*self.to_rgb(value)))
+
     RGB = auto()
     HSV = auto()
     YIQ = auto()
@@ -12,6 +52,11 @@ class ColorMode(Enum):
 
 class PixelOrder(Enum):
     """Any combination of R, G, B and W is possible"""
+
+    @property
+    def num(self) -> int:
+        return len(self.name)
+    
     RGB = auto()
     GRB = auto()
     RGBW = auto()

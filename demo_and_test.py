@@ -72,9 +72,9 @@ def class_test():
         print(f" Power at {neo.power_consumption:.1f} W")
         sleep(0.5)
 
-        neo[:] = (1,1,1,1)
-        if neo().is_simulated:
-            print("full power")
+        print("full power")
+        neo[:] = (1., 1., 1., 1.)
+        neo()
         neo.clear()()
 
 

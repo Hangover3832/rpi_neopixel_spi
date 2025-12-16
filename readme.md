@@ -1,3 +1,5 @@
+**This is a Python and GIT learning project**
+
 # NeoPixel SPI Driver Library for the Raspberry Pi
 
 This Python library provides an optimized SPI driver for controlling WS2812/SK6812 (NeoPixel) LED strips. It features efficient bit encoding that allows controlling up to 320 LEDs in a single SPI buffer transmission.
