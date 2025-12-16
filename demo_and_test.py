@@ -7,17 +7,48 @@ from random import random, randint
 
 
 def class_test():
+    # RpiNeoPixelSPI(8, pixel_order=PixelOrder.GRB)(0, 1.0) # setting the white LED an a non RGBW throws an exception
+    # RpiNeoPixelSPI(8, pixel_order=PixelOrder.GRB)[1] = 0.5 # setting the white LED an a non RGBW throws an exception
+
+    RpiNeoPixelSPI(8, gamma_func=lambda x: x**2.4).fill((0.5,0.5,0.5))() # Test simple lambda gamma function
+    RpiNeoPixelSPI(8, gamma_func=create_gamma_function(np.array([0.1, 0.9]))).fill((0.5,0.5,0.5))() # Test custom gamma function
+
     with RpiNeoPixelSPI(60, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1, gamma_func=linear_gamma, max_power=10) as neo:
+
+        print("Virtual screens:")
+        screen = neo.add_virtual_screen(np.array([[5, 7, 9], [18, 19, 20]]))
+
+        # Put some colors on the virtual screen:
+        screen_data1 = np.array([
+                [[1.0, 0., 0., 1.0], [0., 1., 0., 0.0], [0., 0., 1., 0.]],
+                [[0., 1., 0., 0], [0., 0., 1., 0.], [1., 0., 0., 1.0]],
+        ])
+        if neo.virtual_screen_data(screen, screen_data1)().is_simulated:
+            print()
+
         neo.clear()
-        neo.set_value([10, 20, 50], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 70 to red
-        neo[30:40] = 0, 0, 1, 1 # set pixels 30..39 to blue on white
+
+        # Turn on some white LEDs on the virtual screen:
+        screen_data2 = np.array([
+                [[0.], [1.], [1.]],
+                [[0.], [1.], [0.]],
+        ])
+        if neo.virtual_screen_data(screen, screen_data2)().is_simulated:
+            print()
+
+        neo.clear()
+        neo.set_value([10, 20, 50], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 50 to red
+        neo[30:40] = 0., 0., 1., 1. # set pixels 30..39 to blue on white
         neo *= np.array([1.0, 1.0, 1.0, 0.75]) # reduce all white LEDs brithness to 75%
         neo[45] = 1.0 # This sets only the white LED on a RGBW Neopixel
-        neo[45] = 1, 0, 0 # set pixel to red, keep the white LED as is
-        neo[:10] = 0, 1, 1 # set first 10 pixels to aqua
-        neo[-10:] = 1, 1, 0 # set last 10 pixels to yellow
+        neo[45] = 1., 0., 0. # set pixel to red, keep the white LED as is
+        neo[:10] = 0., 1., 1. # set first 10 pixels to aqua
+        neo[-10:] = 1., 1., 0. # set last 10 pixels to yellow
         neo() # show()
         sleep(1)
+
+        i = np.array([5, 10, 15, 20])
+        neo([*i], (0., 0., 0.))
 
         for _ in range(10):
             neo << 1 # left roll by 1, but not show() # type: ignore
@@ -50,6 +81,7 @@ def class_test():
 def GammaTest() -> None:
 
     with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, gamma_func=default_gamma) as neo:
+        # Create a brightness gradient
         for i in neo:
             neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
         if neo().is_simulated:
@@ -64,19 +96,13 @@ def Rainbow():
         neo[:3] = 1.0
         drop.interval = random()
 
-    @Every.every(1)
-    def gap(neo:RpiNeoPixelSPI):
-        neo[:3] = 0,0,0,0
-        gap.interval = random()+0.5
-
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=0.25) as neo:
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=1.0) as neo:
         neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         for i in neo:
             # Create a rainbow pattern in the default HSV space
             neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
         while True:
             drop(neo)
-            #gap(neo)
             neo[-1] = 0.0
             neo >>= 1 # roll the pattern and show()
             
@@ -85,18 +111,18 @@ def Rainbow():
 
 
 def Raindrops():
+    
     @Every.every(0.1)
     def drop(strip: RpiNeoPixelSPI):
         # place a random colored pixel at a random location in a random interval
         index = randint(0, strip.num_pixels-1) # random position
-        hue = random() # a random color at full saturation and intensity
+        hue = random() # a random color in HSV color space
         if random() > 0.75:
+            # Create a white pixel then and now
             strip[index] = 1.0
         else:
-            strip.set_value(index, (hue, 1.0, 1.0), color_mode=ColorMode.HSV)()
+            strip.set_value(index, (hue, 1.0, 1.0))()
         drop.interval = random()/5
-        if strip.is_simulated:
-            print()
 
     @Every.every(0.01)
     def decay(strip: RpiNeoPixelSPI):
@@ -104,10 +130,16 @@ def Raindrops():
         strip += -0.005
         strip()
 
-    with RpiNeoPixelSPI(150, max_power=5, pixel_order=PixelOrder.GRBW) as neo:
+    @Every.every(0.05)
+    def roll(strip: RpiNeoPixelSPI):
+        strip >>= 1
+
+
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW) as neo:
         while True:
             drop(neo)
             decay(neo)
+            # roll(neo)
             sleep(0.001)
 
 

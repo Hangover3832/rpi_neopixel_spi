@@ -3,7 +3,6 @@ import numpy as np
 from colors import PixelOrder
 from enum import Enum
 
-
 class Spi_Clock(Enum): # SPI clock rates
     CLOCK_400KHZ  = 1_625_000
     CLOCK_800KHZ  = 3_250_000
