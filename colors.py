@@ -1,14 +1,17 @@
-from matplotlib.colors import to_rgb
+from typing import Callable
+from humanfriendly import coerce_pattern
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
 
+
 class ColorMode(Enum):
 
     # All color mode conversions from_rgb and to_rgb are available in the colorsys module
     def from_rgb(self, rgb: np.ndarray) -> np.ndarray:
-        assert rgb.max()<=1.0 and rgb.min()>= 0.0
+        rgb = np.clip(rgb, 0.0, 1.0)
+        # assert rgb.max()<=1.0 and rgb.min()>= 0.0
         return {
             ColorMode.RGB: rgb[0:3],
             ColorMode.HSV: np.array(rgb_to_hsv(*rgb[0:3])),
@@ -17,7 +20,8 @@ class ColorMode(Enum):
         }[self]
 
     def to_rgb(self, value:np.ndarray) -> np.ndarray:
-        assert value.max()<=1.0 and value.min()>= 0.0
+        # assert value.max()<=1.0 and value.min()>= 0.0
+        value = np.clip(value, 0.0, 1.0)
         return {
             ColorMode.RGB: value[0:3],
             ColorMode.HSV: np.array(hsv_to_rgb(*value[0:3])),
@@ -27,22 +31,32 @@ class ColorMode(Enum):
     
     # Define all the missing color mode conversion methods via rgb:
     def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
-        return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(*hsv[0:3])))
+        hsv = np.clip(hsv, 0.0, 1.0)
+        return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(*hsv[:3])))
 
     def to_hsv(self, value:np.ndarray) -> np.ndarray:
+        value = np.clip(value, 0.0, 1.0)
         return value if self == ColorMode.HSV else np.array(rgb_to_hsv(*self.to_rgb(value)))
 
     def from_yiq(self, yiq:np.ndarray) -> np.ndarray:
-        return yiq if self == ColorMode.YIQ else self.from_rgb(np.array(yiq_to_rgb(*yiq[0:3])))
+        yiq = np.clip(yiq, 0.0, 1.0)
+        return yiq if self == ColorMode.YIQ else self.from_rgb(np.array(yiq_to_rgb(*yiq[:3])))
 
     def to_yiq(self, value:np.ndarray) -> np.ndarray:
+        value = np.clip(value, 0.0, 1.0)
         return value if self == ColorMode.YIQ else np.array(rgb_to_yiq(*self.to_rgb(value)))
 
     def from_hls(self, hls:np.ndarray) -> np.ndarray:
-        return hls if self == ColorMode.HLS else self.from_rgb(np.array(hls_to_rgb(*hls[0:3])))
+        hls = np.clip(hls, 0.0, 1.0)
+        return hls if self == ColorMode.HLS else self.from_rgb(np.array(hls_to_rgb(*hls[:3])))
 
     def to_hls(self, value:np.ndarray) -> np.ndarray:
+        value = np.clip(value, 0.0, 1.0)
         return value if self == ColorMode.HLS else np.array(rgb_to_hls(*self.to_rgb(value)))
+
+    @staticmethod
+    def default() -> 'ColorMode':
+        return ColorMode.HSV
 
     RGB = auto()
     HSV = auto()
@@ -55,12 +69,22 @@ class PixelOrder(Enum):
 
     @property
     def num(self) -> int:
+        """Return the number of LED per pixel (3 or 4)"""
         return len(self.name)
-    
-    RGB = auto()
-    GRB = auto()
-    RGBW = auto()
-    GRBW = auto()
+
+    @property
+    def blank(self) -> np.ndarray:
+        """Return color black value appropriate for the pixel type (RGB or RGBW)"""
+        return np.array([0., 0., 0., 0.]) if self.num > 3 else np.array([0., 0., 0.])
+
+    @classmethod
+    def default(cls) -> 'PixelOrder':
+        return cls.GRB
+
+    RGB     = auto()
+    GRB     = auto()
+    RGBW    = auto()
+    GRBW    = auto()
 
 
 """
@@ -71,7 +95,7 @@ https://en.wikipedia.org/wiki/Polynomial_regression
 CUSTOM_GAMMA = np.array([
     0.0,    # value for 0% brightness
     0.25,   # value for 25% brightness
-    0.50,   # value for 50% brightness
+    0.5,   # value for 50% brightness
     0.75,   # value for 75% brightness
     1.0     # value for 100% brightness
 ]) # insert more values in between if desired
@@ -100,56 +124,83 @@ CRAZY_GAMMA = np.array([1.0, 0.0, 1.0])
 # dark pixels are bright, bright pixels are bright and middle pixels are dark ;-)
 
 
+def _create_gamma_function(values_out: np.ndarray) -> np.poly1d:
+    """Calculate a polynomial that fits the given output values **exactly**."""
+    return np.poly1d(np.linalg.solve(np.vander(np.linspace(0.0, 1.0, n:=len(values_out)), N=n), values_out))
+
+
 def create_gamma_function(values_out: np.ndarray) -> Poly:
-    """apply a (n-1)th degree polynomial fit using n(values_out) distinct data points.
-    Args:
-        values_out (np.ndarray): Array of output values for the polynomial fit.
-    Returns:
-        A polynomial function that maps input values in [0, 1] to the specified output values [0, 1].
+    """Apply a (n-1)th degree polynomial least quare fit using n(values_out) distinct data points.
+
+    :param values_out: Array of output values for the polynomial fit. For the input values, a linear space is calculated.
+    :type values_out: np.ndarray
+    :returns: A polynomial function that maps input values in [0, 1] to the specified output values [0, 1].
+    :rtype: numpy.polynomial.Polynomial
     """
-    n = len(values_out)
-    assert n > 1, "Gamma polynomial must have more than 1 data points"
-    vIn = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
-    return Poly.fit(vIn, values_out, deg=n-1, domain=(0.0, 1.0), window=(0.0, 1.0))
+    assert (n := len(values_out)) > 1, "Gamma polynomial must have more than 1 data points"
+    values_in = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
+    return Poly.fit(values_in, values_out, deg=n-1, window=(0.0, 1.0), domain=(0.0, 1.0))
 
 
-default_gamma = create_gamma_function(DEFAULT_GAMMA)
-srgb_gamma =    create_gamma_function(SRGB_GAMMA)
-simple_gamma =  create_gamma_function(SIMPLE_GAMMA)
-no_dark_gamma = create_gamma_function(NO_DARK_GAMMA)
-crazy_gamma =   create_gamma_function(CRAZY_GAMMA)
-square_gamma =  create_gamma_function(SQUARE_GAMMA)
-linear_gamma =  create_gamma_function(LINEAR_GAMMA)
-inverse_gamma = create_gamma_function(INVERSE_GAMMA)
-custom_gamma =  create_gamma_function(CUSTOM_GAMMA)
+class G(Enum):
+    """Gamma functions enum class."""
+
+    @classmethod
+    def Default(cls) -> Callable:
+        return cls.default.value
+    
+    @classmethod
+    def plot(cls, function: Callable | None = None, builtin:bool=True) -> None:
+        """
+        Gamma function plotter.
+        
+        :param function: The function to be plotted along the built-in functions.
+        :type function: Callable | None
+        """
+
+        import matplotlib.pyplot as plt
+        from matplotlib.axes._axes import Axes
+        from matplotlib.figure import Figure
+
+        x: np.ndarray = np.linspace(0.0, 1.0, 25)
+        splt = plt.subplots(2)
+        fig: Figure = splt[0]
+        ax: Axes = splt[1]
+        ax[0].set(xlim=(0.0, 1.0), ylim=(0.0, 1.0)) # type: ignore
+        ax[1].set(xlim=(0.0, 1.0), ylim=(0.0, 1.0)) # type: ignore
+        ax[0].set_title("Custom Gamma Function") # type: ignore
+        ax[1].set_title("Built-in Gamma Functions") # type: ignore
+        ax[1].set_xlabel("Input Value") # type: ignore
+        ax[1].set_ylabel("LED Brightness") # type: ignore
+
+        # Plot all bilt-in gamma functions
+        if builtin:
+            for f in G:
+                ax[1].plot(x, f.value(x), linewidth=2.0, label=f.name) # type: ignore
+
+        if function:
+            # Plot a custom gamma function
+            ax[0].plot(x, function(x), linewidth=2.0) # type: ignore
+
+        ax[1].legend() # type: ignore
+        plt.show()
 
 
-def plot_gamma_functions() -> None:
-    import matplotlib.pyplot as plt
-    from matplotlib.axes._axes import Axes
-    from matplotlib.figure import Figure
+    default = create_gamma_function(DEFAULT_GAMMA)
+    srgb    = create_gamma_function(SRGB_GAMMA)
+    simple  = create_gamma_function(SIMPLE_GAMMA)
+    no_dark = create_gamma_function(NO_DARK_GAMMA)
+    crazy   = create_gamma_function(CRAZY_GAMMA)
+    square  = create_gamma_function(SQUARE_GAMMA)
+    linear  = create_gamma_function(LINEAR_GAMMA)
+    inverse = create_gamma_function(INVERSE_GAMMA)
+    custom  = create_gamma_function(CUSTOM_GAMMA)
 
-    x = np.linspace(0.0, 1.0, 25)
-    splt = plt.subplots()
-    fig: Figure = splt[0]
-    ax: Axes = splt[1]
-    ax.set(xlim=(0.0, 1.0), ylim=(0.0, 1.0))
-    ax.set_title("Gamma Functions")
-    ax.set_xlabel("Input Value")
-    ax.set_ylabel("LED Brightness")
 
-    ax.plot(x, default_gamma(x), linewidth=2.0, label='default_gamma')
-    ax.plot(x, srgb_gamma(x), linewidth=2.0, label='srgb_gamma')
-    ax.plot(x, simple_gamma(x), linewidth=2.0, label='simple_gamma')
-    ax.plot(x, no_dark_gamma(x), linewidth=2.0, label='no_dark_gamma')
-    ax.plot(x, crazy_gamma(x), linewidth=2.0, label='crazy_gamma')
-    ax.plot(x, square_gamma(x), linewidth=2.0, label='square_gamma')
-    ax.plot(x, linear_gamma(x), linewidth=2.0, label='linear_gamma')
-    ax.plot(x, inverse_gamma(x), linewidth=2.0, label='inverse_gamma')
-    ax.plot(x, custom_gamma(x), linewidth=2.0, label='custom_gamma')
+def main():
+    test_gamma = lambda x: 0.5 + np.sin(x * 2 * np.pi) / 2
+    G.plot(test_gamma)    
 
-    fig.legend()
-    plt.show()
 
 if __name__ == '__main__':
-    plot_gamma_functions()
+    main()

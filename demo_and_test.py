@@ -1,7 +1,8 @@
+from encodings import mbcs
 from time import sleep
 import numpy as np
 from neopixel_spi import RpiNeoPixelSPI
-from colors import ColorMode, PixelOrder, linear_gamma, default_gamma, create_gamma_function
+from colors import ColorMode, PixelOrder, create_gamma_function, G
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
 
@@ -10,10 +11,12 @@ def class_test():
     # RpiNeoPixelSPI(8, pixel_order=PixelOrder.GRB)(0, 1.0) # setting the white LED an a non RGBW throws an exception
     # RpiNeoPixelSPI(8, pixel_order=PixelOrder.GRB)[1] = 0.5 # setting the white LED an a non RGBW throws an exception
 
-    RpiNeoPixelSPI(8, gamma_func=lambda x: x**2.4).fill((0.5,0.5,0.5))() # Test simple lambda gamma function
+    g = lambda x: x**2.4 # Gamma 2.4
+    # G.plot(g)
+    RpiNeoPixelSPI(8, gamma_func=g).fill((0.5,0.5,0.5))() # Test simple lambda gamma function
     RpiNeoPixelSPI(8, gamma_func=create_gamma_function(np.array([0.1, 0.9]))).fill((0.5,0.5,0.5))() # Test custom gamma function
 
-    with RpiNeoPixelSPI(60, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1, gamma_func=linear_gamma, max_power=10) as neo:
+    with RpiNeoPixelSPI(60, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1, gamma_func=G.linear.value, max_power=10) as neo:
 
         print("Virtual screens:")
         screen = neo.add_virtual_screen(np.array([[5, 7, 9], [18, 19, 20]]))
@@ -44,7 +47,7 @@ def class_test():
         neo[45] = 1., 0., 0. # set pixel to red, keep the white LED as is
         neo[:10] = 0., 1., 1. # set first 10 pixels to aqua
         neo[-10:] = 1., 1., 0. # set last 10 pixels to yellow
-        neo() # show()
+        neo() # neo.show()
         sleep(1)
 
         i = np.array([5, 10, 15, 20])
@@ -80,7 +83,7 @@ def class_test():
 
 def GammaTest() -> None:
 
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, gamma_func=default_gamma) as neo:
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW) as neo:
         # Create a brightness gradient
         for i in neo:
             neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
@@ -91,23 +94,24 @@ def GammaTest() -> None:
 def Rainbow():
 
     @Every.every(0.5)
-    def drop(neo: RpiNeoPixelSPI):
+    def drop():
         """Drop in some white pixels"""
-        neo[:3] = 1.0
         drop.interval = random()
-
+        
     with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=1.0) as neo:
         neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         for i in neo:
             # Create a rainbow pattern in the default HSV space
             neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
         while True:
-            drop(neo)
-            neo[-1] = 0.0
-            neo >>= 1 # roll the pattern and show()
-            
-            #decay(neo)
-            # sleep(random())
+            if drop()[0]:
+                neo.roll(value=1.0) # drop a white pixel
+            else:
+                neo.roll()
+
+            neo()[-1] = 0.0 # remove the last white pixel
+
+            sleep(0.001)
 
 
 def Raindrops():
@@ -155,6 +159,6 @@ if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
     class_test()
-    # Raindrops()
     Rainbow()
+    # Raindrops()
     # power_measure()

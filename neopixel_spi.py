@@ -9,7 +9,7 @@ from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls,
 from typing import Callable
 from devices import SpiDev, OutputDevice # type: ignore
 from devices import Spi_Clock
-from colors import PixelOrder, ColorMode, default_gamma
+from colors import PixelOrder, ColorMode, G #, default_gamma
 
 
 PixelIndex = int | list[int] | tuple[int, ...] | slice
@@ -30,6 +30,8 @@ class RpiNeoPixelSPI:
         pixel_order (PixelOrder, optional): Order of color channels in the NeoPixel (e.g., GRB, RGBW). Defaults to GRB.
         clock_rate (Spi_Clock, optional): SPI clock rate in Hz. Defaults to CLOCK_800KHZ.
         custom_cs (int, optional): Custom chip select pin.
+            **Note: if you use custom chip select, the Rabian driver might not be able to to disable the standart cs pin.
+            Please leave the standard pin (7 or 8) unconnected in this case, especial if you want to use multple strips at the same time!**
         max_power (float, optional): Maximum power in watts. The strip is dimmed automatically if this limit is reached.
             Set this value to 0 to disable power control.
             The calculation of the power consumtion can be adjusted with the `wats_per_led` attribute.
@@ -48,10 +50,6 @@ class RpiNeoPixelSPI:
         ```
     """
 
-    COLOR_RGB_BLACK     = np.array([0., 0., 0.])
-    COLOR_RGB_BLACK_W   = np.array([0., 0., 0., 0.])
-    COLOR_RGB_WHITE     = np.array([1., 1., 1.])
-    COLOR_RGB_WHITE_W   = np.array([0., 0., 0., 1.])
     SPI_HIGH_BIT        = 0xC0
     SPI_LOW_BIT         = 0x80
     SPI_HIGH_BIT2       = 0x0C
@@ -62,11 +60,11 @@ class RpiNeoPixelSPI:
                 num_pixels: int,
                 *,
                 device: int = 0,
-                gamma_func: Callable = default_gamma,
-                color_mode: ColorMode = ColorMode.HSV,
+                gamma_func: Callable = G.Default(),
+                color_mode: ColorMode = ColorMode.default(),
                 brightness: float = 1.0, 
                 auto_write: bool = False,
-                pixel_order: PixelOrder = PixelOrder.GRB,
+                pixel_order: PixelOrder = PixelOrder.default(),
                 clock_rate: Spi_Clock = Spi_Clock.CLOCK_800KHZ,
                 custom_cs: int | None = None,
                 max_power: float = 0.0
@@ -270,7 +268,7 @@ class RpiNeoPixelSPI:
         if isinstance(value, (float, int)):
             self._write_value_to_buffer(index, value)
         else:
-            rgb = self._to_RGB(np.clip(np.array(value), 0.0, 1.0), color_mode=color_mode)
+            rgb = self._to_RGB(np.array(value), color_mode=color_mode)
             self._write_value_to_buffer(index, rgb)
 
         return self.show() if self._auto_write else self
@@ -279,7 +277,6 @@ class RpiNeoPixelSPI:
     def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
         """Fill all pixels with a given value"""
         return self.set_value(slice(None), value=value, color_mode=color_mode)
-
 
     def __iadd__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
         """Add value to the pixel buffer in RGB space, e.g. pixels += 0.1"""
@@ -338,17 +335,20 @@ class RpiNeoPixelSPI:
         
         :param shift: Number of positions to shift. Positive values shift right, negative values shift left. Defaults to 1.
         :type shift: int
-        :param value: If value is None, pixels that roll off one end will reappear at the other end. If a value is provided, 
-            pixels that roll in will be set to this value.
+        :param value: If `value` is None, pixels that roll off one end will reappear at the other end. If a `value` is provided, 
+            pixels that roll in will be set to this value. If `value` is a single number, only the white LED is affected in a RGBW stripe.
         :type value: PixelValue | None
         :returns: The current instance of RpiNeoPixelSPI.
         :rtype: RpiNeoPixelSPI
         """
+        if shift == 0:
+            return self
 
         if value is None:
             self._pixel_buffer = np.roll(self._pixel_buffer, shift, axis=0)
         else:
-            value = np.array([0., 0., 0., value]) if isinstance(value, (float,int)) else np.array(value)
+            if not isinstance(value, (float, int)):
+                value = np.array(value)
 
             if shift > 0:
                 self._pixel_buffer[shift:] = self._pixel_buffer[:-shift]
@@ -361,10 +361,7 @@ class RpiNeoPixelSPI:
         return self.show() if self._auto_write else self
 
 
-    def __call__(self, 
-                 index: PixelIndex | None = None, 
-                 value: PixelValue | None = None
-                 ) -> 'RpiNeoPixelSPI':
+    def __call__(self, index: PixelIndex | None = None, value: PixelValue | None = None) -> 'RpiNeoPixelSPI':
         """
         Calls `show()` that updates the stripe if no index or value is provided. If index is provided but no value,
         the pixel(s) at index gets cleared. If both index and value are provided, the pixel
@@ -374,7 +371,7 @@ class RpiNeoPixelSPI:
         :param index: Pixel index number(s)
         :type index: int or slice
         :param value: Pixel value. 
-            If value is a number, it sets the White LED only in a RGBW stripe. A non RGBW stripe
+            If value is a number, it affects the White LED only in a RGBW stripe. A non RGBW stripe
             will throw an exception in this case.
         :type value: number or array like
         """
@@ -403,8 +400,8 @@ class RpiNeoPixelSPI:
     @property
     def blank(self) -> np.ndarray:
         """Get a black color value appropriate for the pixel type (RGB or RGBW)."""
-        return self.COLOR_RGB_BLACK_W if self._has_W else self.COLOR_RGB_BLACK
-
+        return self._pixel_order.blank
+    
     @property
     def _has_W(self) -> bool:
         """Check if the pixel type has a white channel."""
@@ -482,7 +479,7 @@ class RpiNeoPixelSPI:
 
     @max_power.setter
     def max_power(self, max_power: float) -> None:
-        self._max_power = float(np.clip(max_power, 0.0, 1.0))
+        self._max_power = max_power
         self._write_buffer()
 
     @property
