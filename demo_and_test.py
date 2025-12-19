@@ -1,4 +1,3 @@
-from encodings import mbcs
 from time import sleep
 import numpy as np
 from neopixel_spi import RpiNeoPixelSPI
@@ -26,7 +25,7 @@ def class_test():
                 [[1.0, 0., 0., 1.0], [0., 1., 0., 0.0], [0., 0., 1., 0.]],
                 [[0., 1., 0., 0], [0., 0., 1., 0.], [1., 0., 0., 1.0]],
         ])
-        if neo.virtual_screen_data(screen, screen_data1)().is_simulated:
+        if neo.virtual_screen_data(screen, screen_data1, color_mode=ColorMode.RGB)().is_simulated:
             print()
 
         neo.clear()
@@ -50,6 +49,7 @@ def class_test():
         neo() # neo.show()
         sleep(1)
 
+        # alternative indexing
         i = np.array([5, 10, 15, 20])
         neo([*i], (0., 0., 0.))
 
@@ -77,8 +77,44 @@ def class_test():
 
         print("full power")
         neo[:] = (1., 1., 1., 1.)
-        neo()
-        neo.clear()()
+        neo().clear()()
+
+
+def ColorModeTest():
+    """Color mode conversion test"""
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW) as neo:
+        r = np.array([1.,0.,0.])
+        g = np.array([0., 1., 0.])
+        b = np.array([0. ,0., 1.])
+        neo.color_mode = ColorMode.RGB
+        neo.next(r)
+        neo.next(g)
+        neo.next(b)
+        neo().color_mode = ColorMode.HSV
+        v1 = neo.color_mode.from_rgb(r)
+        v2 = neo.color_mode.from_rgb(g)
+        v3 = neo.color_mode.from_rgb(b)
+        print("R G & B in HVS", v1, v2, v3)
+        neo.next(v1)
+        neo.next(v2)
+        neo.next(v3)
+        neo().color_mode = ColorMode.HLS
+        v1 = neo.color_mode.from_rgb(r)
+        v2 = neo.color_mode.from_rgb(g)
+        v3 = neo.color_mode.from_rgb(b)
+        print("R G & B in HLS", v1, v2, v3)
+        neo.next(v1)
+        neo.next(v2)
+        neo.next(v3)
+        neo().color_mode = ColorMode.YIQ
+        v1 = neo.color_mode.from_rgb(r)
+        v2 = neo.color_mode.from_rgb(g)
+        v3 = neo.color_mode.from_rgb(b)
+        print("R G & B in YIQ", v1, v2, v3)
+        neo.next(v1)
+        neo.next(v2)
+        neo.next(v3)
+        neo().clear()
 
 
 def GammaTest() -> None:
@@ -90,6 +126,8 @@ def GammaTest() -> None:
         if neo().is_simulated:
             print()
 
+        neo.clear()
+
 
 def Rainbow():
 
@@ -97,7 +135,7 @@ def Rainbow():
     def drop():
         """Drop in some white pixels"""
         drop.interval = random()
-        
+
     with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=1.0) as neo:
         neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         for i in neo:
@@ -109,7 +147,7 @@ def Rainbow():
             else:
                 neo.roll()
 
-            neo()[-1] = 0.0 # remove the last white pixel
+            neo()[-1] = 0.0 # remove the last white pixel so it doesn't roll in again
 
             sleep(0.001)
 
@@ -121,28 +159,26 @@ def Raindrops():
         # place a random colored pixel at a random location in a random interval
         index = randint(0, strip.num_pixels-1) # random position
         hue = random() # a random color in HSV color space
-        if random() > 0.75:
-            # Create a white pixel then and now
-            strip[index] = 1.0
-        else:
-            strip.set_value(index, (hue, 1.0, 1.0))()
+        strip.set_value(index, (hue, 1.0, 1.0))
         drop.interval = random()/5
 
-    @Every.every(0.01)
-    def decay(strip: RpiNeoPixelSPI):
-        # reduce all pixel values to fade them out
-        strip += -0.005
-        strip()
+    @Every.every(1.0)
+    def dropW(strip: RpiNeoPixelSPI):
+        # place a white pixel at a random location every second
+        index = randint(0, strip.num_pixels-1) # random position
+        value = random() # a random color in HSV color space
+        strip.set_value(index, value)
 
     @Every.every(0.05)
-    def roll(strip: RpiNeoPixelSPI):
-        strip >>= 1
+    def roll(neo):
+        neo <<= 1
 
-
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW) as neo:
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, gamma_func=G.linear.value) as neo:
         while True:
             drop(neo)
-            decay(neo)
+            dropW(neo)
+            neo *= 0.98 # pixel decay
+            neo()
             # roll(neo)
             sleep(0.001)
 
@@ -158,7 +194,8 @@ def power_measure():
 if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
-    class_test()
-    Rainbow()
-    # Raindrops()
+    #class_test()
+    ColorModeTest()
+    #Rainbow()
+    Raindrops()
     # power_measure()

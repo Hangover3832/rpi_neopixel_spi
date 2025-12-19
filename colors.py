@@ -1,5 +1,4 @@
 from typing import Callable
-from humanfriendly import coerce_pattern
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
@@ -10,53 +9,41 @@ class ColorMode(Enum):
 
     # All color mode conversions from_rgb and to_rgb are available in the colorsys module
     def from_rgb(self, rgb: np.ndarray) -> np.ndarray:
-        rgb = np.clip(rgb, 0.0, 1.0)
-        # assert rgb.max()<=1.0 and rgb.min()>= 0.0
         return {
-            ColorMode.RGB: rgb[0:3],
-            ColorMode.HSV: np.array(rgb_to_hsv(*rgb[0:3])),
-            ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[0:3])),
-            ColorMode.HLS: np.array(rgb_to_hls(*rgb[0:3]))
+            ColorMode.RGB: rgb,
+            ColorMode.HSV: np.array(rgb_to_hsv(*rgb[:3])),
+            ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[:3])),
+            ColorMode.HLS: np.array(rgb_to_hls(*rgb[:3]))
         }[self]
 
+
     def to_rgb(self, value:np.ndarray) -> np.ndarray:
-        # assert value.max()<=1.0 and value.min()>= 0.0
-        value = np.clip(value, 0.0, 1.0)
         return {
-            ColorMode.RGB: value[0:3],
-            ColorMode.HSV: np.array(hsv_to_rgb(*value[0:3])),
-            ColorMode.YIQ: np.array(yiq_to_rgb(*value[0:3])),
-            ColorMode.HLS: np.array(hls_to_rgb(*value[0:3]))
+            ColorMode.RGB: value,
+            ColorMode.HSV: np.array(hsv_to_rgb(*value[:3])),
+            ColorMode.YIQ: np.array(yiq_to_rgb(*value[:3])),
+            ColorMode.HLS: np.array(hls_to_rgb(*value[:3]))
         }[self]
-    
+   
     # Define all the missing color mode conversion methods via rgb:
     def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
-        hsv = np.clip(hsv, 0.0, 1.0)
         return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(*hsv[:3])))
 
     def to_hsv(self, value:np.ndarray) -> np.ndarray:
-        value = np.clip(value, 0.0, 1.0)
-        return value if self == ColorMode.HSV else np.array(rgb_to_hsv(*self.to_rgb(value)))
+        return value if self == ColorMode.HSV else np.array(rgb_to_hsv(*self.to_rgb(value[:3])))
 
     def from_yiq(self, yiq:np.ndarray) -> np.ndarray:
-        yiq = np.clip(yiq, 0.0, 1.0)
         return yiq if self == ColorMode.YIQ else self.from_rgb(np.array(yiq_to_rgb(*yiq[:3])))
 
     def to_yiq(self, value:np.ndarray) -> np.ndarray:
-        value = np.clip(value, 0.0, 1.0)
-        return value if self == ColorMode.YIQ else np.array(rgb_to_yiq(*self.to_rgb(value)))
+        return value if self == ColorMode.YIQ else np.array(rgb_to_yiq(*self.to_rgb(value[:3])))
 
     def from_hls(self, hls:np.ndarray) -> np.ndarray:
-        hls = np.clip(hls, 0.0, 1.0)
         return hls if self == ColorMode.HLS else self.from_rgb(np.array(hls_to_rgb(*hls[:3])))
 
     def to_hls(self, value:np.ndarray) -> np.ndarray:
-        value = np.clip(value, 0.0, 1.0)
-        return value if self == ColorMode.HLS else np.array(rgb_to_hls(*self.to_rgb(value)))
+        return value if self == ColorMode.HLS else np.array(rgb_to_hls(*self.to_rgb(value[:3])))
 
-    @staticmethod
-    def default() -> 'ColorMode':
-        return ColorMode.HSV
 
     RGB = auto()
     HSV = auto()
@@ -74,12 +61,9 @@ class PixelOrder(Enum):
 
     @property
     def blank(self) -> np.ndarray:
-        """Return color black value appropriate for the pixel type (RGB or RGBW)"""
+        """Return black color value appropriate for the pixel type (RGB or RGBW)"""
         return np.array([0., 0., 0., 0.]) if self.num > 3 else np.array([0., 0., 0.])
 
-    @classmethod
-    def default(cls) -> 'PixelOrder':
-        return cls.GRB
 
     RGB     = auto()
     GRB     = auto()
@@ -109,7 +93,7 @@ SIMPLE_GAMMA = np.array([0.0, 0.214, 1.0]) # sRGB 21.4% middle grey
 
 DEFAULT_GAMMA = np.array([0.0, 0.11, 0.18, 0.35, 1.0]) # 18% middle grey + my own magic
 """ 
-Note that I created this masterpiece of gamma based on the 18% middle grey principle
+I created this masterpiece of gamma based on the 18% middle grey principle
 (Munsell, Sloan & Godlove, see https://en.wikipedia.org/wiki/Middle_gray) and just by my own subjective
 perception of brightness on a particular neopixel stripe.
 """
@@ -146,11 +130,7 @@ class G(Enum):
     """Gamma functions enum class."""
 
     @classmethod
-    def Default(cls) -> Callable:
-        return cls.default.value
-    
-    @classmethod
-    def plot(cls, function: Callable | None = None, builtin:bool=True) -> None:
+    def plot(cls, function: Callable | None = None) -> None:
         """
         Gamma function plotter.
         
@@ -174,9 +154,8 @@ class G(Enum):
         ax[1].set_ylabel("LED Brightness") # type: ignore
 
         # Plot all bilt-in gamma functions
-        if builtin:
-            for f in G:
-                ax[1].plot(x, f.value(x), linewidth=2.0, label=f.name) # type: ignore
+        for f in G:
+            ax[1].plot(x, f.value(x), linewidth=2.0, label=f.name) # type: ignore
 
         if function:
             # Plot a custom gamma function
@@ -198,7 +177,7 @@ class G(Enum):
 
 
 def main():
-    test_gamma = lambda x: 0.5 + np.sin(x * 2 * np.pi) / 2
+    test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
     G.plot(test_gamma)    
 
 

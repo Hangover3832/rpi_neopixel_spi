@@ -60,11 +60,11 @@ class RpiNeoPixelSPI:
                 num_pixels: int,
                 *,
                 device: int = 0,
-                gamma_func: Callable = G.Default(),
-                color_mode: ColorMode = ColorMode.default(),
+                gamma_func: Callable = G.default.value,
+                color_mode: ColorMode = ColorMode.HSV,
                 brightness: float = 1.0, 
                 auto_write: bool = False,
-                pixel_order: PixelOrder = PixelOrder.default(),
+                pixel_order: PixelOrder = PixelOrder.GRB,
                 clock_rate: Spi_Clock = Spi_Clock.CLOCK_800KHZ,
                 custom_cs: int | None = None,
                 max_power: float = 0.0
@@ -128,16 +128,16 @@ class RpiNeoPixelSPI:
         
         :param config: A 2-dimensional array that contains all the pixel indices that bild up the screen,
         mapping from the top left to the bottom right on the virtual screen.
-        :type config: np.ndarray[[int, ...]]
+        :type config: np.ndarray[[int, ...], ...]
         :returns: The index number of the newly created screen.
         :rtype: int
         """
 
-        self._mini_screens.append(config.astype(np.int32))
+        self._mini_screens.append(config.astype(np.int16))
         return len(self._mini_screens)-1
 
 
-    def virtual_screen_data(self, index: int, data: np.ndarray) -> 'RpiNeoPixelSPI':
+    def virtual_screen_data(self, index: int, data: np.ndarray, color_mode: ColorMode  | None = None) -> 'RpiNeoPixelSPI':
         """
         Put pixel data onto a virtual screen.
 
@@ -152,29 +152,25 @@ class RpiNeoPixelSPI:
 
         assert data.shape[:2] == self._mini_screens[index].shape
         indexes = self._mini_screens[index].flatten()
-        datas = data.reshape(-1, data.shape[2]).squeeze()
+        data = data.reshape(-1, data.shape[2]).squeeze()
         for d, i in enumerate(indexes):
-            self.set_value(i, datas[d], color_mode=ColorMode.RGB)
+            self.set_value(i, data[d], color_mode=color_mode)
 
         return self
 
 
     def _from_RGB(self, rgb: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from RGB to color_mode (or, if not provided, to the current color mode)"""
-
         result = (color_mode or self.color_mode).from_rgb(rgb)
         return np.append(result, rgb[3]) if rgb.shape[0] > 3 and self._has_W else result
 
-
     def _to_RGB(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to RGB"""
-
         result = (color_mode or self.color_mode).to_rgb(value)
         return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
 
     def _to_HSV(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to HSV"""
-
         result = (color_mode or self._color_mode).to_hsv(value)
         return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
 
@@ -201,11 +197,11 @@ class RpiNeoPixelSPI:
         self._num_lit_pixels = int(np.count_nonzero(np.max(rgb_buffer, axis=1)))
 
         # rows are now pixels, columns are R,G,B,(W)
-        # rearange the rgb_buffer to the correct pixel order
+        # rearange the rgb_buffer to the correct PixelOrder
         # Here, we allow every possible pixel order with R,G,B and optional W
         rgb_buffer = rgb_buffer[:, [self._pixel_order.name.index(c) for c in 'RGBW' if c in self._pixel_order.name]]
 
-        # Convert [r, g, b, (w)] uint8 to a single uint32:
+        # Convert [r, g, b, (w)] uint8 to uint32:
         if self._has_W:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00_00, 0x1_00_00, 0x1_00, 1], dtype=np.uint32)
         else:
@@ -244,19 +240,19 @@ class RpiNeoPixelSPI:
 
 
     def _write_value_to_buffer(self, index: PixelIndex, value: PixelValue) -> None:
-        """Write value(s) to the interbal pixelbuffer in RGB space"""
+        """Write value(s) to the interbal pixelbuffer that is held in RGB space"""
 
         if isinstance(value, (float, int)):
             # a simple number applies to the white pixel only if available
             if self._has_W:
-                self._pixel_buffer[index, 3] = float(np.clip(value, 0.0, 1.0))
+                self._pixel_buffer[index, 3] = value
                 return
             else:
                 raise ValueError("Cannot set white LED on non RGBW Neopixel")
 
         if (value := np.array(value)).shape[0] == 3:
             # if RGB is passed but the stripe has RGBW, only store RGB and keep W as is
-            self._pixel_buffer[index, :3] = np.clip(value, 0.0, 1.0)
+            self._pixel_buffer[index, :3] = value
             return
 
         self._pixel_buffer[index] = value[:4]
@@ -272,7 +268,11 @@ class RpiNeoPixelSPI:
             self._write_value_to_buffer(index, rgb)
 
         return self.show() if self._auto_write else self
+    
 
+    def next(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
+        """Set the value for the next pixel in the iteration"""
+        return self.set_value(next(self), value=value, color_mode=color_mode)
 
     def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
         """Fill all pixels with a given value"""
@@ -288,6 +288,7 @@ class RpiNeoPixelSPI:
         self._pixel_buffer =  np.clip(self._pixel_buffer * value, 0., 1.)
         return self.show() if self._auto_write else self
 
+    '''
     def __lshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the left by amount, e.g. `pixels << 1`"""
         return self.roll(-int(abs(amount)))
@@ -295,22 +296,20 @@ class RpiNeoPixelSPI:
     def __rshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the right by amount, e.g. `pixels >> 1`"""
         return self.roll(int(abs(amount)))
+    '''
 
     def __ilshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the left by amount, e.g. `pixels <<= 1`"""
-        self.roll(-int(abs(amount)))
-        return self if self.auto_write else self.show()
+        return self.roll(-int(abs(amount)))
     
     def __irshift__(self, amount: int) -> 'RpiNeoPixelSPI':
         """roll to the right by amount, e.g. `pixels >>= 1`"""
-        self.roll(int(abs(amount)))
-        return self if self.auto_write else self.show()
+        return self.roll(int(abs(amount)))
 
     def __invert__(self)-> 'RpiNeoPixelSPI':
         """Invert all colors of all pixels, e.g. `~pixels` """
         self._pixel_buffer = 1.0 - self._pixel_buffer
         return self.show() if self.auto_write else self
-
 
     def clear(self) -> 'RpiNeoPixelSPI':
         """Clear all pixels by setting them to black."""
@@ -388,7 +387,7 @@ class RpiNeoPixelSPI:
     def __iter__(self):
         return self
 
-    def __next__(self) -> int:
+    def __next__(self):
         """ Iterate over the indices of the pixels. """
         if self._index >= len(self):
             self._index = 0
