@@ -1,7 +1,7 @@
-from abc import ABC
 import numpy as np
 from colors import PixelOrder
 from enum import Enum
+
 
 class Spi_Clock(Enum): # SPI clock rates
     CLOCK_400KHZ  = 1_625_000
@@ -19,7 +19,7 @@ except:
           """)
 
 
-    class DummyRPIDev(ABC):
+    class DummyRPIDev():
 
         IS_DUMMY_DEVICE = True
 
