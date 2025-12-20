@@ -54,7 +54,7 @@ def class_test():
         neo([*i], (0., 0., 0.))
 
         for _ in range(10):
-            neo << 1 # left roll by 1, but not show() # type: ignore
+            neo <<= 1 # left roll by 1, but not show() # type: ignore
             sleep(0.1)
             (~neo)() # invert colors and show()
             neo *= 0.9 # multiply all led values with 0.9
@@ -194,7 +194,7 @@ def power_measure():
 if __name__ == "__main__":
     RpiNeoPixelSPI(320).clear()()
     GammaTest()
-    #class_test()
+    class_test()
     ColorModeTest()
     #Rainbow()
     Raindrops()

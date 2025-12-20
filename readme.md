@@ -179,18 +179,13 @@ with RpiNeoPixelSPI(60, gamma_func=square_gamma) as strip:
     strip += 0.6
     strip += -0.2
 
-    # Roll all pixels to the left or right with immediate update
+    # Roll all pixels to the left or right
     strip <<= 1 # roll 1 pixel to left
     strip >>= 2 # roll 2 pixels to the right
-
-    # Roll without immediate update
-    strip >> 1 # type: ignore
-    strip << 2 # type: ignore
 
     # Invert all colors
     ~strip # type ignore
     (~strip)() # with update
-
 ```
 
 ### Using Gamma Correction

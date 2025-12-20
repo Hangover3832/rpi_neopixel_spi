@@ -145,7 +145,7 @@ class G(Enum):
         x: np.ndarray = np.linspace(0.0, 1.0, 25)
         splt = plt.subplots(2)
         fig: Figure = splt[0]
-        ax: Axes = splt[1]
+        ax: Axes = splt[1] # type: ignore
         ax[0].set(xlim=(0.0, 1.0), ylim=(0.0, 1.0)) # type: ignore
         ax[1].set(xlim=(0.0, 1.0), ylim=(0.0, 1.0)) # type: ignore
         ax[0].set_title("Custom Gamma Function") # type: ignore
