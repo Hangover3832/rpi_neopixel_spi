@@ -77,7 +77,7 @@ def class_test():
 
         print("full power")
         neo[:] = (1., 1., 1., 1.)
-        neo().clear()()
+        neo().clear()
 
 
 def ColorModeTest():
@@ -126,33 +126,40 @@ def GammaTest() -> None:
         if neo().is_simulated:
             print()
 
-        neo.clear()
+        neo()
 
 
-def Rainbow():
+def Rainbow(neo: RpiNeoPixelSPI):
 
     @Every.every(0.5)
     def drop():
         """Drop in some white pixels"""
         drop.interval = random()
 
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=1.0) as neo:
-        neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
-        for i in neo:
-            # Create a rainbow pattern in the default HSV space
-            neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
-        while True:
-            if drop()[0]:
-                neo.roll(value=1.0) # drop a white pixel
-            else:
-                neo.roll()
+    @Every.every(5.0)
+    def stopit():
+        pass
 
-            neo()[-1] = 0.0 # remove the last white pixel so it doesn't roll in again
+    neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
+    for i in neo:
+        # Create a rainbow pattern in the default HSV space
+        neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
 
-            sleep(0.001)
+    while True:
+        if drop()[0]:
+            neo.roll(value=1.0) # drop a white pixel
+        else:
+            neo.roll()
+
+        neo()[-1] = 0.0 # remove the last white pixel so it doesn't roll in again
+        sleep(0.001)
+
+        if stopit()[0]:
+            break
 
 
-def Raindrops():
+def Raindrops(neo: RpiNeoPixelSPI):
+    neo.gamma_func = G.linear.value
     
     @Every.every(0.1)
     def drop(strip: RpiNeoPixelSPI):
@@ -169,18 +176,24 @@ def Raindrops():
         value = random() # a random color in HSV color space
         strip.set_value(index, value)
 
+
     @Every.every(0.05)
     def roll(neo):
         neo <<= 1
 
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, gamma_func=G.linear.value) as neo:
-        while True:
-            drop(neo)
-            dropW(neo)
-            neo *= 0.98 # pixel decay
-            neo()
-            # roll(neo)
-            sleep(0.001)
+    @Every.every(30.0)
+    def stopit():
+        pass
+
+    while True:
+        drop(neo)
+        dropW(neo)
+        neo *= 0.98 # pixel decay
+        neo()
+        # roll(neo)
+        sleep(0.001)
+        if stopit()[0]:
+            break
 
 
 def power_measure():
@@ -188,7 +201,31 @@ def power_measure():
     with RpiNeoPixelSPI(10, pixel_order=PixelOrder.GRBW, color_mode=ColorMode.RGB, gamma_func=lin_gamma) as neo:
         neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         neo[:] = 1.0, 1.0, 1.0, 1.0
+        neo()
         print(f"{neo().power_consumption=}")
+
+
+def light_show():
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, max_power=5.0) as neo:
+        while True:
+            Rainbow(neo)
+            Raindrops(neo)
+
+
+def flame():
+
+    def hue(index:int) -> float:
+        return 0.5 - (index / (neo.num_pixels-1) / 2)
+    
+    @Every.every(0.01)
+    def decay(neo: RpiNeoPixelSPI):
+        neo *= 0.95
+    
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=1) as neo:
+        for i in range(0, neo.num_pixels):
+            k = i / (neo.num_pixels-1)
+            neo.set_temperature(i, k)[i] = 0.0
+        neo()
 
 
 if __name__ == "__main__":
@@ -196,6 +233,6 @@ if __name__ == "__main__":
     GammaTest()
     class_test()
     ColorModeTest()
-    #Rainbow()
-    Raindrops()
-    # power_measure()
+    power_measure()
+    light_show()
+    #flame()

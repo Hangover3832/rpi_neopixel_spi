@@ -1,16 +1,50 @@
-from typing import Callable
+from typing import Callable, Tuple
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
 from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
+import math
+
+
+def _create_gamma_function(values_out:np.ndarray) -> np.poly1d:
+    """Calculate a polynomial that fits the given output values **exactly**."""
+    return np.poly1d(np.linalg.solve(np.vander(np.linspace(0.0, 1.0, n:=len(values_out)), N=n), values_out))
+
+
+def create_gamma_function(values_out:np.ndarray, values_in:np.ndarray | None = None) -> Poly:
+    """Apply a (n-1)th degree polynomial least quare fit using n(values_out) distinct data points.
+
+    :param values_out: Array of output values for the polynomial fit. For the input values, a linear space is calculated.
+    :type values_out: np.ndarray
+    :returns: A polynomial function that maps input values in [0, 1] to the specified output values [0, 1].
+    :rtype: numpy.polynomial.Polynomial
+    """
+    assert (n := len(values_out)) > 1, "Gamma polynomial must have more than 1 data points"
+    if values_in is None:
+        values_in = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
+    return Poly.fit(values_in, values_out, deg=n-1, window=(0.0, 1.0), domain=(0.0, 1.0))
+
+
+class TempColor:
+    kelvin_R = _create_gamma_function(np.array([1.0, 0.55, 1.0/3, 0.0]))
+    kelvin_B = _create_gamma_function(np.array([0.0, 0.05, 1.0/3, 1.0]))
+    kelvin_G = 1.0 - kelvin_R - kelvin_B
+
+    @classmethod
+    def temperature_to_RGB(cls, temp:float) -> tuple[float, float, float]:
+        return cls.kelvin_R(temp), cls.kelvin_G(temp), cls.kelvin_B(temp)
 
 
 class ColorMode(Enum):
 
+    def kelvin_to_rgb(self, kelvin: float) -> np.ndarray:
+        """Returns RGB"""
+        return np.array(TempColor.temperature_to_RGB(kelvin))
+
     # All color mode conversions from_rgb and to_rgb are available in the colorsys module
     def from_rgb(self, rgb: np.ndarray) -> np.ndarray:
         return {
-            ColorMode.RGB: rgb,
+            ColorMode.RGB: rgb[:3],
             ColorMode.HSV: np.array(rgb_to_hsv(*rgb[:3])),
             ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[:3])),
             ColorMode.HLS: np.array(rgb_to_hls(*rgb[:3]))
@@ -19,12 +53,12 @@ class ColorMode(Enum):
 
     def to_rgb(self, value:np.ndarray) -> np.ndarray:
         return {
-            ColorMode.RGB: value,
+            ColorMode.RGB: value[:3],
             ColorMode.HSV: np.array(hsv_to_rgb(*value[:3])),
             ColorMode.YIQ: np.array(yiq_to_rgb(*value[:3])),
             ColorMode.HLS: np.array(hls_to_rgb(*value[:3]))
         }[self]
-   
+
     # Define all the missing color mode conversion methods via rgb:
     def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
         return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(*hsv[:3])))
@@ -108,29 +142,11 @@ CRAZY_GAMMA = np.array([1.0, 0.0, 1.0])
 # dark pixels are bright, bright pixels are bright and middle pixels are dark ;-)
 
 
-def _create_gamma_function(values_out: np.ndarray) -> np.poly1d:
-    """Calculate a polynomial that fits the given output values **exactly**."""
-    return np.poly1d(np.linalg.solve(np.vander(np.linspace(0.0, 1.0, n:=len(values_out)), N=n), values_out))
-
-
-def create_gamma_function(values_out: np.ndarray) -> Poly:
-    """Apply a (n-1)th degree polynomial least quare fit using n(values_out) distinct data points.
-
-    :param values_out: Array of output values for the polynomial fit. For the input values, a linear space is calculated.
-    :type values_out: np.ndarray
-    :returns: A polynomial function that maps input values in [0, 1] to the specified output values [0, 1].
-    :rtype: numpy.polynomial.Polynomial
-    """
-    assert (n := len(values_out)) > 1, "Gamma polynomial must have more than 1 data points"
-    values_in = np.linspace(0.0, 1.0, n) # create the linear input space from 0..1
-    return Poly.fit(values_in, values_out, deg=n-1, window=(0.0, 1.0), domain=(0.0, 1.0))
-
-
 class G(Enum):
     """Gamma functions enum class."""
 
     @classmethod
-    def plot(cls, function: Callable | None = None) -> None:
+    def plot(cls, functions: list[Callable] | None = None) -> None:
         """
         Gamma function plotter.
         
@@ -146,8 +162,8 @@ class G(Enum):
         splt = plt.subplots(2)
         fig: Figure = splt[0]
         ax: Axes = splt[1] # type: ignore
-        ax[0].set(xlim=(0.0, 1.0), ylim=(0.0, 1.0)) # type: ignore
         ax[1].set(xlim=(0.0, 1.0), ylim=(0.0, 1.0)) # type: ignore
+        ax[0].set(xlim=(0.0, 1.0), ylim=(-0.1, 1.1)) # type: ignore
         ax[0].set_title("Custom Gamma Function") # type: ignore
         ax[1].set_title("Built-in Gamma Functions") # type: ignore
         ax[1].set_xlabel("Input Value") # type: ignore
@@ -157,9 +173,10 @@ class G(Enum):
         for f in G:
             ax[1].plot(x, f.value(x), linewidth=2.0, label=f.name) # type: ignore
 
-        if function:
-            # Plot a custom gamma function
-            ax[0].plot(x, function(x), linewidth=2.0) # type: ignore
+        if functions:
+            for f in functions:
+                # Plot a custom gamma function
+                ax[0].plot(x, f(x), linewidth=2.0) # type: ignore
 
         ax[1].legend() # type: ignore
         plt.show()
@@ -177,8 +194,9 @@ class G(Enum):
 
 
 def main():
-    test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
-    G.plot(test_gamma)    
+    # test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
+    kelvin = TempColor.kelvin_R + TempColor.kelvin_G + TempColor.kelvin_B
+    G.plot([TempColor.kelvin_R, TempColor.kelvin_G, TempColor.kelvin_B, kelvin])
 
 
 if __name__ == '__main__':

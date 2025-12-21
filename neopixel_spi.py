@@ -9,7 +9,7 @@ from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls,
 from typing import Callable
 from devices import SpiDev, OutputDevice # type: ignore
 from devices import Spi_Clock
-from colors import PixelOrder, ColorMode, G #, default_gamma
+from colors import PixelOrder, ColorMode, G
 
 
 PixelIndex = int | list[int] | tuple[int, ...] | slice
@@ -151,22 +151,22 @@ class RpiNeoPixelSPI:
         """
 
         assert data.shape[:2] == self._mini_screens[index].shape
-        indexes = self._mini_screens[index].flatten()
+        indices = self._mini_screens[index].flatten()
         data = data.reshape(-1, data.shape[2]).squeeze()
-        for d, i in enumerate(indexes):
+        for d, i in enumerate(indices):
             self.set_value(i, data[d], color_mode=color_mode)
 
-        return self
+        return self.show() if self._auto_write else self
 
 
     def _from_RGB(self, rgb: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from RGB to color_mode (or, if not provided, to the current color mode)"""
-        result = (color_mode or self.color_mode).from_rgb(rgb)
+        result = (color_mode or self._color_mode).from_rgb(rgb)
         return np.append(result, rgb[3]) if rgb.shape[0] > 3 and self._has_W else result
 
     def _to_RGB(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
         """Convert value from color_mode (or, if not provided, the current color mode) to RGB"""
-        result = (color_mode or self.color_mode).to_rgb(value)
+        result = (color_mode or self._color_mode).to_rgb(value)
         return np.append(result, value[3]) if value.shape[0] > 3 and self._has_W else result
 
     def _to_HSV(self, value: np.ndarray, color_mode: ColorMode | None = None) -> np.ndarray:
@@ -240,7 +240,7 @@ class RpiNeoPixelSPI:
 
 
     def _write_value_to_buffer(self, index: PixelIndex, value: PixelValue) -> None:
-        """Write value(s) to the interbal pixelbuffer that is held in RGB space"""
+        """Write RGB value(s) to the interbal pixelbuffer that is held in RGB space"""
 
         if isinstance(value, (float, int)):
             # a simple number applies to the white pixel only if available
@@ -256,6 +256,14 @@ class RpiNeoPixelSPI:
             return
 
         self._pixel_buffer[index] = value[:4]
+
+
+    def set_temperature(self, index:PixelIndex, temperature:float) -> 'RpiNeoPixelSPI':
+        """Set pixel value at index using an approximation for the black body temperature radiation, 
+        maintaining a constant brightness. The temperature ranges from [0.0 .. 1.0]"""
+
+        self._write_value_to_buffer(index, self._color_mode.kelvin_to_rgb(temperature))
+        return self.show() if self._auto_write else self
 
 
     def set_value(self, index: PixelIndex, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
@@ -345,19 +353,17 @@ class RpiNeoPixelSPI:
 
         if value is None:
             self._pixel_buffer = np.roll(self._pixel_buffer, shift, axis=0)
+            return self.show() if self._auto_write else self
         else:
             if not isinstance(value, (float, int)):
                 value = np.array(value)
 
             if shift > 0:
                 self._pixel_buffer[shift:] = self._pixel_buffer[:-shift]
-                self._write_value_to_buffer(slice(None,shift), value)
-
-            elif shift < 0:
+                return self.set_value(slice(None,shift), value)
+            else:
                 self._pixel_buffer[:shift] = self._pixel_buffer[-shift:]
-                self._write_value_to_buffer(slice(shift, None), value)
-
-        return self.show() if self._auto_write else self
+                return self.set_value(slice(shift, None), value)
 
 
     def __call__(self, index: PixelIndex | None = None, value: PixelValue | None = None) -> 'RpiNeoPixelSPI':
@@ -484,6 +490,14 @@ class RpiNeoPixelSPI:
     @property
     def is_simulated(self) -> bool:
         return hasattr(self._spi, "IS_DUMMY_DEVICE")
+    
+    @property
+    def pixel_buffer(self) -> np.ndarray:
+        return self._pixel_buffer
+
+    @pixel_buffer.setter
+    def pixel_buffer(self, value:np.ndarray) -> None:
+        self._pixel_buffer = value
 
 
     def cleanup(self) -> None:
