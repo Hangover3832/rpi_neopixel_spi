@@ -26,13 +26,43 @@ def create_gamma_function(values_out:np.ndarray, values_in:np.ndarray | None = N
 
 
 class TempColor:
-    kelvin_R = _create_gamma_function(np.array([1.0, 0.55, 1.0/3, 0.0]))
-    kelvin_B = _create_gamma_function(np.array([0.0, 0.05, 1.0/3, 1.0]))
+    """
+    Black body temeratur spectrum.
+    C = red yellow white blue
+    T = 0  1/3  2/3   3/3   1"""
+    R = (1.0,  1.0,  1.0, 0.0)
+    G = (0.0,  1.0,  0.9, 0.0) # avoid the appearance of green in the spectrum
+    B = (0.0,  0.0,  0.9, 1.0)
+    RGB = np.array([R, G, B])
+
+    kelvin_R = _create_gamma_function(np.array([1.0, 0.55, 0.333, 0.0]))
+    kelvin_B = _create_gamma_function(np.array([0.0, 0.05, 0.333, 1.0]))
     kelvin_G = 1.0 - kelvin_R - kelvin_B
+
+
+    @classmethod
+    def _temperature_to_RGB(cls, temp:float) -> tuple[float, float, float]:
+        return cls.kelvin_R(temp), cls.kelvin_G(temp), cls.kelvin_B(temp)
 
     @classmethod
     def temperature_to_RGB(cls, temp:float) -> tuple[float, float, float]:
-        return cls.kelvin_R(temp), cls.kelvin_G(temp), cls.kelvin_B(temp)
+        if temp <= 1.0/3:
+            interval = np.array((0.0, 1.0/3))
+            rgb = cls.RGB[:, :2]
+        elif temp >= 2.0/3:
+            interval = np.array((2.0/3, 1.0))
+            rgb = cls.RGB[:, 2:]
+        else:
+            interval = np.array((1.0/3, 2.0/3))
+            rgb = cls.RGB[:, 1:-1]
+
+        r = np.interp(temp, interval, rgb[0])
+        g = np.interp(temp, interval, rgb[1])
+        b = np.interp(temp, interval, rgb[2])
+
+        return r, g, b
+
+
 
 
 class ColorMode(Enum):
@@ -194,7 +224,7 @@ class G(Enum):
 
 
 def main():
-    # test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
+    test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
     kelvin = TempColor.kelvin_R + TempColor.kelvin_G + TempColor.kelvin_B
     G.plot([TempColor.kelvin_R, TempColor.kelvin_G, TempColor.kelvin_B, kelvin])
 
