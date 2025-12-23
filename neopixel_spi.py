@@ -70,8 +70,8 @@ class RpiNeoPixelSPI:
                 max_power: float = 0.0
                 ) -> None:
 
+        self.reversed: bool = False
         self.watts_per_led: np.ndarray = np.array([0.081, 0.081, 0.08, 0.09])
-
         self._pixel_order: PixelOrder = pixel_order
         self._color_mode: ColorMode = color_mode
         self._auto_write = auto_write
@@ -178,7 +178,7 @@ class RpiNeoPixelSPI:
     def _write_buffer(self) -> None:
         """Write pixel data to NeoPixels using SPI protocol."""
 
-        rgb_buffer = self._pixel_buffer.copy()
+        rgb_buffer = self._pixel_buffer[::-1].copy() if self.reversed else self._pixel_buffer.copy()
 
         # Apply brightness and gamma correction
         rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
@@ -201,7 +201,7 @@ class RpiNeoPixelSPI:
         # Here, we allow every possible pixel order with R,G,B and optional W
         rgb_buffer = rgb_buffer[:, [self._pixel_order.name.index(c) for c in 'RGBW' if c in self._pixel_order.name]]
 
-        # Convert [r, g, b, (w)] uint8 to uint32:
+        # Convert [r, g, b, (w)] to uint32:
         if self._has_W:
             rgb_buffer = rgb_buffer * np.array([0x1_00_00_00, 0x1_00_00, 0x1_00, 1], dtype=np.uint32)
         else:
@@ -258,11 +258,13 @@ class RpiNeoPixelSPI:
         self._pixel_buffer[index] = value[:4]
 
 
-    def set_temperature(self, index:PixelIndex, temperature:float) -> 'RpiNeoPixelSPI':
+    def set_temperature(self, index:PixelIndex, temperature:float, brightness:float = 1.0) -> 'RpiNeoPixelSPI':
         """Set pixel value at index using an approximation for the black body temperature radiation, 
         maintaining a constant brightness. The temperature ranges from [0.0 .. 1.0]"""
 
-        self._write_value_to_buffer(index, self._color_mode.kelvin_to_rgb(temperature))
+        self._write_value_to_buffer(index, 
+                                    brightness * self._color_mode.kelvin_to_rgb(
+                                    np.clip(temperature, 0.0, 1.0)))
         return self.show() if self._auto_write else self
 
 
@@ -454,8 +456,6 @@ class RpiNeoPixelSPI:
     @auto_write.setter
     def auto_write(self, value:bool) -> None:
         """Set a new auto_write state."""
-        if value and not self._auto_write:
-            self.show()
         self._auto_write = value
 
     @property
