@@ -1,4 +1,5 @@
-from time import sleep
+from time import sleep, monotonic
+from matplotlib import axis
 import numpy as np
 from neopixel_spi import RpiNeoPixelSPI
 from colors import ColorMode, PixelOrder, create_gamma_function, G
@@ -206,33 +207,42 @@ def power_measure():
 
 
 def light_show():
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, max_power=5.0) as neo:
+    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, max_power=0.5) as neo:
         while True:
             Rainbow(neo)
             Raindrops(neo)
 
 
-def flame():
+def fire():
+    from effects import Fire
 
-    def hue(index:int) -> float:
-        return 0.5 - (index / (neo.num_pixels-1) / 2)
-    
-    @Every.every(0.01)
-    def decay(neo: RpiNeoPixelSPI):
-        neo *= 0.95
-    
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, brightness=1) as neo:
-        for i in range(0, neo.num_pixels):
-            k = i / (neo.num_pixels-1)
-            neo.set_temperature(i, k)[i] = 0.0
-        neo()
+    candle = Fire(
+        RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB, brightness=1.0),
+        spectrum=(0.5, -0.2),
+        decay_factor=(0.95, 0.9),
+        spark_interval_factor=0.05,
+        spark_propagation_delay=0.01
+        )
+
+    candle.neo.reversed = False
+    candle.ignite_spark.pause()
+    candle._temperature_gradient()
+
+    t = monotonic() + 2.5
+    while monotonic() < t:
+        candle.progress()
+
+    candle.ignite_spark.resume()
+    while True:
+        candle.progress()
 
 
 if __name__ == "__main__":
-    RpiNeoPixelSPI(320).clear()()
-    GammaTest()
-    class_test()
-    ColorModeTest()
-    power_measure()
-    light_show()
-    #flame()
+    RpiNeoPixelSPI(320, device=0).clear()()
+    RpiNeoPixelSPI(320, device=1).clear()()
+    #GammaTest()
+    #class_test()
+    #ColorModeTest()
+    #power_measure()
+    #light_show()
+    fire()
