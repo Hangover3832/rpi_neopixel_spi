@@ -178,7 +178,7 @@ class RpiNeoPixelSPI:
     def _write_buffer(self) -> None:
         """Write pixel data to NeoPixels using SPI protocol."""
 
-        rgb_buffer = self._pixel_buffer[::-1].copy() if self.reversed else self._pixel_buffer.copy()
+        rgb_buffer = self._pixel_buffer.copy()[::-1] if self.reversed else self._pixel_buffer.copy()
 
         # Apply brightness and gamma correction
         rgb_buffer = np.clip(self._gamma_func(rgb_buffer * self._brightness), 0.0, 1.0)
@@ -295,7 +295,7 @@ class RpiNeoPixelSPI:
 
     def __imul__(self, value: np.ndarray | float) ->'RpiNeoPixelSPI':
         """Multiply value with the pixel buffer in RGB space, e.g. neo *= 0.9"""
-        self._pixel_buffer =  np.clip(self._pixel_buffer * value, 0., 1.)
+        self._pixel_buffer = np.clip(self._pixel_buffer * value, 0., 1.)
         return self.show() if self._auto_write else self
 
     '''
@@ -320,6 +320,7 @@ class RpiNeoPixelSPI:
         """Invert all colors of all pixels, e.g. `~pixels` """
         self._pixel_buffer = 1.0 - self._pixel_buffer
         return self.show() if self.auto_write else self
+
 
     def clear(self) -> 'RpiNeoPixelSPI':
         """Clear all pixels by setting them to black."""

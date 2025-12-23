@@ -1,3 +1,4 @@
+import importlib
 from time import sleep, monotonic
 from matplotlib import axis
 import numpy as np
@@ -83,7 +84,7 @@ def class_test():
 
 def ColorModeTest():
     """Color mode conversion test"""
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW) as neo:
+    with RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW) as neo:
         r = np.array([1.,0.,0.])
         g = np.array([0., 1., 0.])
         b = np.array([0. ,0., 1.])
@@ -120,7 +121,7 @@ def ColorModeTest():
 
 def GammaTest() -> None:
 
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW) as neo:
+    with RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW) as neo:
         # Create a brightness gradient
         for i in neo:
             neo[i] = 0.0, 0.0, i/(neo.num_pixels-1)
@@ -137,109 +138,89 @@ def Rainbow(neo: RpiNeoPixelSPI):
         """Drop in some white pixels"""
         drop.interval = random()
 
-    @Every.every(5.0)
-    def stopit():
-        pass
-
     neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
     for i in neo:
         # Create a rainbow pattern in the default HSV space
         neo[i] = (i/(neo.num_pixels-1), 1.0, 1.0)
 
-    while True:
+
+    @Every.While(5, n=neo) # repeat for 5s
+    def proceed(n:RpiNeoPixelSPI):
         if drop()[0]:
-            neo.roll(value=1.0) # drop a white pixel
+            n.roll(value=1.0) # drop a white pixel
         else:
-            neo.roll()
-
-        neo()[-1] = 0.0 # remove the last white pixel so it doesn't roll in again
-        sleep(0.001)
-
-        if stopit()[0]:
-            break
+            n.roll()
+        n()[-1] = 0.0 # remove the last white pixel so it doesn't roll in again
 
 
 def Raindrops(neo: RpiNeoPixelSPI):
     neo.gamma_func = G.linear.value
     
     @Every.every(0.1)
-    def drop(strip: RpiNeoPixelSPI):
+    def drop(n: RpiNeoPixelSPI):
         # place a random colored pixel at a random location in a random interval
-        index = randint(0, strip.num_pixels-1) # random position
+        index = randint(0, n.num_pixels-1) # random position
         hue = random() # a random color in HSV color space
-        strip.set_value(index, (hue, 1.0, 1.0))
+        n.set_value(index, (hue, 1.0, 1.0))
         drop.interval = random()/5
 
     @Every.every(1.0)
-    def dropW(strip: RpiNeoPixelSPI):
+    def dropW(n:RpiNeoPixelSPI):
         # place a white pixel at a random location every second
-        index = randint(0, strip.num_pixels-1) # random position
+        index = randint(0, n.num_pixels-1) # random position
         value = random() # a random color in HSV color space
-        strip.set_value(index, value)
+        n.set_value(index, value)
+
+    @Every.While(30, n=neo) # repeat for 30s
+    def proceed(n: RpiNeoPixelSPI):
+        drop(n)
+        dropW(n)
+        n *= 0.98 # pixel decay
+        n()
 
 
-    @Every.every(0.05)
-    def roll(neo):
-        neo <<= 1
-
-    @Every.every(30.0)
-    def stopit():
-        pass
-
-    while True:
-        drop(neo)
-        dropW(neo)
-        neo *= 0.98 # pixel decay
-        neo()
-        # roll(neo)
-        sleep(0.001)
-        if stopit()[0]:
-            break
+def light_show():
+    with RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW) as neo:
+        while True:
+            Rainbow(neo)
+            Raindrops(neo)
 
 
 def power_measure():
     lin_gamma = create_gamma_function(np.array([0.0, 1.0]))
-    with RpiNeoPixelSPI(10, pixel_order=PixelOrder.GRBW, color_mode=ColorMode.RGB, gamma_func=lin_gamma) as neo:
+    with RpiNeoPixelSPI(100, device=1, pixel_order=PixelOrder.GRBW, color_mode=ColorMode.RGB, gamma_func=lin_gamma) as neo:
         neo.watts_per_led = np.array([0.042, 0.042, 0.042, 0.084])
         neo[:] = 1.0, 1.0, 1.0, 1.0
-        neo()
+        neo().clear()()
         print(f"{neo().power_consumption=}")
-
-
-def light_show():
-    with RpiNeoPixelSPI(150, pixel_order=PixelOrder.GRBW, max_power=0.5) as neo:
-        while True:
-            Rainbow(neo)
-            Raindrops(neo)
 
 
 def fire():
     from effects import Fire
 
     candle = Fire(
-        RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB, brightness=1.0),
-        spectrum=(0.5, -0.2),
-        decay_factor=(0.95, 0.9),
-        spark_interval_factor=0.05,
+        RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB, gamma_func=G.linear.value, brightness=0.2),
+        spectrum=(0.5, -0.1),
+        decay_factor=(0.95, 0.85),
+        spark_interval_factor=0.01,
         spark_propagation_delay=0.01
         )
 
-    candle.neo.reversed = False
-    candle.ignite_spark.pause()
-    candle._temperature_gradient()
+    # Test temperature gradient and fire decay:
+    candle.ignite_spark.pause() # no ignition now
+    candle.show_temperature_gradient()
+    # let the gradient decay:
+    Every(2.5).do(candle.progress).do_while() # repeat for 2.5s
 
-    t = monotonic() + 2.5
-    while monotonic() < t:
-        candle.progress()
-
+    # Let the candle burn:
     candle.ignite_spark.resume()
     while True:
         candle.progress()
 
 
 if __name__ == "__main__":
-    RpiNeoPixelSPI(320, device=0).clear()()
-    RpiNeoPixelSPI(320, device=1).clear()()
+    RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB).clear()()
+    RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW).clear()()
     #GammaTest()
     #class_test()
     #ColorModeTest()
