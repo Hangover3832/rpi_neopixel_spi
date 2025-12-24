@@ -85,7 +85,7 @@ class ColorMode(Enum):
         if self == ColorMode.RGB:
             return rgb[:3]  
         elif self == ColorMode.HSV:
-            return np.array(rgb_to_hsv(rgb))
+            return rgb_to_hsv(rgb)
         else:
             raise NotImplementedError(f"Color mode {self.value} is currently not implemented.")
 
@@ -95,17 +95,17 @@ class ColorMode(Enum):
         if self == ColorMode.RGB:
             return value[:3]  
         elif self == ColorMode.HSV:
-            return np.array(hsv_to_rgb(value))
+            return hsv_to_rgb(value)
         else:
             raise NotImplementedError(f"Color mode {self.value} is currently not implemented.")
 
 
     # Define all the missing color mode conversion methods via rgb:
     def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
-        return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(hsv)))
+        return hsv if self == ColorMode.HSV else self.from_rgb(hsv_to_rgb(hsv))
 
     def to_hsv(self, value:np.ndarray) -> np.ndarray:
-        return value if self == ColorMode.HSV else np.array(rgb_to_hsv(self.to_rgb(value)))
+        return value if self == ColorMode.HSV else rgb_to_hsv(self.to_rgb(value))
 
     """ 
     def from_yiq(self, yiq:np.ndarray) -> np.ndarray:
