@@ -1,9 +1,8 @@
-import importlib
 from time import sleep, monotonic
 from matplotlib import axis
 import numpy as np
 from neopixel_spi import RpiNeoPixelSPI
-from colors import ColorMode, PixelOrder, create_gamma_function, G
+from colors import ColorMode, PixelOrder, create_gamma_function, G, rgb_to_hsv, hsv_to_rgb, SOME_COLORS
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
 
@@ -84,39 +83,46 @@ def class_test():
 
 def ColorModeTest():
     """Color mode conversion test"""
-    with RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW) as neo:
-        r = np.array([1.,0.,0.])
-        g = np.array([0., 1., 0.])
-        b = np.array([0. ,0., 1.])
-        neo.color_mode = ColorMode.RGB
-        neo.next(r)
-        neo.next(g)
-        neo.next(b)
-        neo().color_mode = ColorMode.HSV
-        v1 = neo.color_mode.from_rgb(r)
-        v2 = neo.color_mode.from_rgb(g)
-        v3 = neo.color_mode.from_rgb(b)
-        print("R G & B in HVS", v1, v2, v3)
-        neo.next(v1)
-        neo.next(v2)
-        neo.next(v3)
-        neo().color_mode = ColorMode.HLS
-        v1 = neo.color_mode.from_rgb(r)
-        v2 = neo.color_mode.from_rgb(g)
-        v3 = neo.color_mode.from_rgb(b)
-        print("R G & B in HLS", v1, v2, v3)
-        neo.next(v1)
-        neo.next(v2)
-        neo.next(v3)
-        neo().color_mode = ColorMode.YIQ
-        v1 = neo.color_mode.from_rgb(r)
-        v2 = neo.color_mode.from_rgb(g)
-        v3 = neo.color_mode.from_rgb(b)
-        print("R G & B in YIQ", v1, v2, v3)
-        neo.next(v1)
-        neo.next(v2)
-        neo.next(v3)
-        neo().clear()
+
+    def test2():
+        buffer = np.zeros([len(SOME_COLORS), 3])
+        for i, (name, color) in enumerate(SOME_COLORS.items()):
+            hsv = rgb_to_hsv(color)
+            print(f"{name}: RGB={color}, HSV={hsv}")
+            buffer[i] = hsv
+
+        print(f"RGB->HSV {np.round(buffer, 3)=}")
+        buffer = hsv_to_rgb(buffer)
+        print(f"HSV->RGB {np.round(buffer, 3)=}")
+
+    #test2()
+    # quit()
+
+
+    def run_test(neo: RpiNeoPixelSPI):
+
+        def process_mode(mode: ColorMode):
+            neo.color_mode = mode
+
+            for i, (name, color) in enumerate(SOME_COLORS.items()):
+                v1 = mode.from_rgb(color)
+                v1 = np.append(v1, 0.) if neo._has_W else v1
+                p = neo.next_(v1)
+                v2 = neo[p]
+                print(f"[{i}] RGB {color} to {mode.name}: {np.round(v1, 3)}")
+                print(f"[{i}] {mode.name}->RGB->{mode.name}:            {np.round(v2, 3)}")
+                if neo().is_simulated:
+                    print()
+
+        for cm in ColorMode:
+            process_mode(cm)
+
+        return neo.clear()
+
+
+    n = 2 * len(SOME_COLORS)
+    run_test(RpiNeoPixelSPI(n, device=1, pixel_order=PixelOrder.GRB))()
+    run_test(RpiNeoPixelSPI(n, device=1, pixel_order=PixelOrder.GRBW))()
 
 
 def GammaTest() -> None:
@@ -171,7 +177,7 @@ def Raindrops(neo: RpiNeoPixelSPI):
         value = random() # a random color in HSV color space
         n.set_value(index, value)
 
-    @Every.While(30, n=neo) # repeat for 30s
+    @Every.While(5, n=neo) # repeat for 30s
     def proceed(n: RpiNeoPixelSPI):
         drop(n)
         dropW(n)
@@ -199,7 +205,7 @@ def fire():
     from effects import Fire
 
     candle = Fire(
-        RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB, gamma_func=G.linear.value, brightness=0.2),
+        RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB, brightness=0.25),
         spectrum=(0.5, -0.1),
         decay_factor=(0.95, 0.85),
         spark_interval_factor=0.01,
@@ -222,8 +228,8 @@ if __name__ == "__main__":
     RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB).clear()()
     RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW).clear()()
     #GammaTest()
-    #class_test()
-    #ColorModeTest()
+    class_test()
+    ColorModeTest()
     #power_measure()
-    #light_show()
+    # light_show()
     fire()

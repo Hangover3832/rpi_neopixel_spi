@@ -1,8 +1,7 @@
 from random import random, randint
 from time import sleep
 import numpy as np
-from pyparsing import col
-from colors import ColorMode, TempColor, create_gamma_function
+from colors import ColorMode, TempColor, create_gamma_function, G
 from neopixel_spi import RpiNeoPixelSPI
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from typing import Tuple
@@ -41,6 +40,7 @@ class Fire:
         self.spark_interval_factor = spark_interval_factor
         self.spark_propagation_delay = spark_propagation_delay
         neopixel.auto_write = True
+        neopixel.gamma_func = G.linear.value
 
     @property
     def decay_factor(self) -> Tuple[float, float]:

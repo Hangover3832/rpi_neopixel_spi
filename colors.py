@@ -2,8 +2,19 @@ from typing import Callable, Tuple
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
-from colorsys import rgb_to_hsv, hsv_to_rgb, rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
-import math
+# from colorsys import rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
+from color_conversions import rgb_to_hsv, hsv_to_rgb
+
+SOME_COLORS = {
+    'red':     np.array([1., 0., 0., 0.]),
+    'green':   np.array([0., 1., 0., 0.]),
+    'blue':    np.array([0. ,0., 1., 0.]),
+    'yellow':  np.array([1., 1., 0., 0.]),
+    'aqua':    np.array([0., 1., 1., 0.]),
+    'pink':    np.array([1., 0., 1., 0.]),
+    'white':   np.array([1., 1., 1., 0.]),
+    'other':   np.array([0.7, 0.5, 0.2, 0.]),
+}
 
 
 def _create_gamma_function(values_out:np.ndarray) -> np.poly1d:
@@ -63,39 +74,40 @@ class TempColor:
         return r, g, b
 
 
-
-
 class ColorMode(Enum):
 
     def kelvin_to_rgb(self, kelvin: float) -> np.ndarray:
-        """Returns RGB"""
         return np.array(TempColor.temperature_to_RGB(kelvin))
 
     # All color mode conversions from_rgb and to_rgb are available in the colorsys module
     def from_rgb(self, rgb: np.ndarray) -> np.ndarray:
-        return {
-            ColorMode.RGB: rgb[:3],
-            ColorMode.HSV: np.array(rgb_to_hsv(*rgb[:3])),
-            ColorMode.YIQ: np.array(rgb_to_yiq(*rgb[:3])),
-            ColorMode.HLS: np.array(rgb_to_hls(*rgb[:3]))
-        }[self]
+
+        if self == ColorMode.RGB:
+            return rgb[:3]  
+        elif self == ColorMode.HSV:
+            return np.array(rgb_to_hsv(rgb))
+        else:
+            raise NotImplementedError(f"Color mode {self.value} is currently not implemented.")
 
 
     def to_rgb(self, value:np.ndarray) -> np.ndarray:
-        return {
-            ColorMode.RGB: value[:3],
-            ColorMode.HSV: np.array(hsv_to_rgb(*value[:3])),
-            ColorMode.YIQ: np.array(yiq_to_rgb(*value[:3])),
-            ColorMode.HLS: np.array(hls_to_rgb(*value[:3]))
-        }[self]
+
+        if self == ColorMode.RGB:
+            return value[:3]  
+        elif self == ColorMode.HSV:
+            return np.array(hsv_to_rgb(value))
+        else:
+            raise NotImplementedError(f"Color mode {self.value} is currently not implemented.")
+
 
     # Define all the missing color mode conversion methods via rgb:
     def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
-        return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(*hsv[:3])))
+        return hsv if self == ColorMode.HSV else self.from_rgb(np.array(hsv_to_rgb(hsv)))
 
     def to_hsv(self, value:np.ndarray) -> np.ndarray:
-        return value if self == ColorMode.HSV else np.array(rgb_to_hsv(*self.to_rgb(value[:3])))
+        return value if self == ColorMode.HSV else np.array(rgb_to_hsv(self.to_rgb(value)))
 
+    """ 
     def from_yiq(self, yiq:np.ndarray) -> np.ndarray:
         return yiq if self == ColorMode.YIQ else self.from_rgb(np.array(yiq_to_rgb(*yiq[:3])))
 
@@ -107,12 +119,13 @@ class ColorMode(Enum):
 
     def to_hls(self, value:np.ndarray) -> np.ndarray:
         return value if self == ColorMode.HLS else np.array(rgb_to_hls(*self.to_rgb(value[:3])))
+    """
 
 
     RGB = auto()
     HSV = auto()
-    YIQ = auto()
-    HLS = auto()
+    # YIQ = auto()
+    # HLS = auto()
 
 
 class PixelOrder(Enum):

@@ -280,9 +280,10 @@ class RpiNeoPixelSPI:
         return self.show() if self._auto_write else self
     
 
-    def next(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
+    def next_(self, value: PixelValue, color_mode: ColorMode | None = None) -> int:
         """Set the value for the next pixel in the iteration"""
-        return self.set_value(next(self), value=value, color_mode=color_mode)
+        self.set_value(result := next(self), value=value, color_mode=color_mode)
+        return result
 
     def fill(self, value: PixelValue, color_mode: ColorMode | None = None) -> 'RpiNeoPixelSPI':
         """Fill all pixels with a given value"""
