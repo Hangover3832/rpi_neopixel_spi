@@ -2,8 +2,8 @@ from typing import Callable, Tuple
 import numpy as np
 from numpy.polynomial import Polynomial as Poly
 from enum import Enum, auto
-# from colorsys import rgb_to_yiq, yiq_to_rgb, rgb_to_hls, hls_to_rgb
-from color_conversions import rgb_to_hsv, hsv_to_rgb
+from color_conversions import rgb_to_hsv, hsv_to_rgb, yiq_to_rgb, temperature_to_RGB
+
 
 SOME_COLORS = {
     'red':     np.array([1., 0., 0., 0.]),
@@ -36,100 +36,47 @@ def create_gamma_function(values_out:np.ndarray, values_in:np.ndarray | None = N
     return Poly.fit(values_in, values_out, deg=n-1, window=(0.0, 1.0), domain=(0.0, 1.0))
 
 
-class TempColor:
-    """
-    Black body temeratur spectrum.
-    C = red yellow white blue
-    T = 0  1/3  2/3   3/3   1"""
-    R = (1.0,  1.0,  1.0, 0.0)
-    G = (0.0,  1.0,  0.9, 0.0) # avoid the appearance of green in the spectrum
-    B = (0.0,  0.0,  0.9, 1.0)
-    RGB = np.array([R, G, B])
-
-    kelvin_R = _create_gamma_function(np.array([1.0, 0.55, 0.333, 0.0]))
-    kelvin_B = _create_gamma_function(np.array([0.0, 0.05, 0.333, 1.0]))
-    kelvin_G = 1.0 - kelvin_R - kelvin_B
-
-
-    @classmethod
-    def _temperature_to_RGB(cls, temp:float) -> tuple[float, float, float]:
-        return cls.kelvin_R(temp), cls.kelvin_G(temp), cls.kelvin_B(temp)
-
-    @classmethod
-    def temperature_to_RGB(cls, temp:float) -> tuple[float, float, float]:
-        if temp <= 1.0/3:
-            interval = np.array((0.0, 1.0/3))
-            rgb = cls.RGB[:, :2]
-        elif temp >= 2.0/3:
-            interval = np.array((2.0/3, 1.0))
-            rgb = cls.RGB[:, 2:]
-        else:
-            interval = np.array((1.0/3, 2.0/3))
-            rgb = cls.RGB[:, 1:-1]
-
-        r = np.interp(temp, interval, rgb[0])
-        g = np.interp(temp, interval, rgb[1])
-        b = np.interp(temp, interval, rgb[2])
-
-        return r, g, b
-
-
 class ColorMode(Enum):
-
-    def kelvin_to_rgb(self, kelvin: float) -> np.ndarray:
-        return np.array(TempColor.temperature_to_RGB(kelvin))
-
-    # All color mode conversions from_rgb and to_rgb are available in the colorsys module
-    def from_rgb(self, rgb: np.ndarray) -> np.ndarray:
-
-        if self == ColorMode.RGB:
-            return rgb[:3]  
-        elif self == ColorMode.HSV:
-            return rgb_to_hsv(rgb)
-        else:
-            raise NotImplementedError(f"Color mode {self.value} is currently not implemented.")
-
-
-    def to_rgb(self, value:np.ndarray) -> np.ndarray:
-
-        if self == ColorMode.RGB:
-            return value[:3]  
-        elif self == ColorMode.HSV:
-            return hsv_to_rgb(value)
-        else:
-            raise NotImplementedError(f"Color mode {self.value} is currently not implemented.")
-
-
-    # Define all the missing color mode conversion methods via rgb:
-    def from_hsv(self, hsv:np.ndarray) -> np.ndarray:
-        return hsv if self == ColorMode.HSV else self.from_rgb(hsv_to_rgb(hsv))
-
-    def to_hsv(self, value:np.ndarray) -> np.ndarray:
-        return value if self == ColorMode.HSV else rgb_to_hsv(self.to_rgb(value))
-
-    """ 
-    def from_yiq(self, yiq:np.ndarray) -> np.ndarray:
-        return yiq if self == ColorMode.YIQ else self.from_rgb(np.array(yiq_to_rgb(*yiq[:3])))
-
-    def to_yiq(self, value:np.ndarray) -> np.ndarray:
-        return value if self == ColorMode.YIQ else np.array(rgb_to_yiq(*self.to_rgb(value[:3])))
-
-    def from_hls(self, hls:np.ndarray) -> np.ndarray:
-        return hls if self == ColorMode.HLS else self.from_rgb(np.array(hls_to_rgb(*hls[:3])))
-
-    def to_hls(self, value:np.ndarray) -> np.ndarray:
-        return value if self == ColorMode.HLS else np.array(rgb_to_hls(*self.to_rgb(value[:3])))
-    """
-
-
     RGB = auto()
     HSV = auto()
-    # YIQ = auto()
-    # HLS = auto()
+    # YIQ = auto() # implement yiq_to_rgb() and rgb_to_yiq() first
+    # HLS = auto() # implement hls_to_rgb() and rgb_to_hls() first
+
+
+    @classmethod
+    def kelvin_to_rgb(cls, kelvin: float) -> np.ndarray:
+        return np.array(temperature_to_RGB(kelvin))
+
+    def convert_to(self, value: np.ndarray, to_mode:'ColorMode') -> np.ndarray:
+        """
+        Convert color value from this color mode to the specified color mode.
+        Note that the color conversion function mode_to_mode() must be globally avilable.
+
+        :param value: The color value to be converted.
+        :type value: np.ndarray
+        :param to_mode: The target color mode.
+        :type to_mode: ColorMode
+        :return: The converted color value.
+        :rtype: np.ndarray"""
+
+        if self == to_mode:
+            return value[..., :3]
+
+        convert_function = f"{self.name.lower()}_to_{to_mode.name.lower()}"
+        function = globals().get(convert_function)
+        if function and callable(function):
+            return function(value) # type: ignore
+
+        raise NotImplementedError(f"{self.name} to {to_mode.name} is not implemented: '{convert_function}()'")
 
 
 class PixelOrder(Enum):
     """Any combination of R, G, B and W is possible"""
+
+    RGB     = auto()
+    GRB     = auto()
+    RGBW    = auto()
+    GRBW    = auto()
 
     @property
     def num(self) -> int:
@@ -140,12 +87,6 @@ class PixelOrder(Enum):
     def blank(self) -> np.ndarray:
         """Return black color value appropriate for the pixel type (RGB or RGBW)"""
         return np.array([0., 0., 0., 0.]) if self.num > 3 else np.array([0., 0., 0.])
-
-
-    RGB     = auto()
-    GRB     = auto()
-    RGBW    = auto()
-    GRBW    = auto()
 
 
 """
@@ -194,7 +135,7 @@ class G(Enum):
         Gamma function plotter.
         
         :param function: The function to be plotted along the built-in functions.
-        :type function: Callable | None
+        :type function: list[Callable] | None
         """
 
         import matplotlib.pyplot as plt
@@ -212,13 +153,13 @@ class G(Enum):
         ax[1].set_xlabel("Input Value") # type: ignore
         ax[1].set_ylabel("LED Brightness") # type: ignore
 
-        # Plot all bilt-in gamma functions
+        # Plot all built-in gamma functions
         for f in G:
             ax[1].plot(x, f.value(x), linewidth=2.0, label=f.name) # type: ignore
 
         if functions:
             for f in functions:
-                # Plot a custom gamma function
+                # Plot custom gamma functions
                 ax[0].plot(x, f(x), linewidth=2.0) # type: ignore
 
         ax[1].legend() # type: ignore
@@ -238,8 +179,7 @@ class G(Enum):
 
 def main():
     test_gamma = lambda x: .5 + np.sin(x * 2 * np.pi) / 2
-    kelvin = TempColor.kelvin_R + TempColor.kelvin_G + TempColor.kelvin_B
-    G.plot([TempColor.kelvin_R, TempColor.kelvin_G, TempColor.kelvin_B, kelvin])
+    G.plot([test_gamma])
 
 
 if __name__ == '__main__':
