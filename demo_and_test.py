@@ -1,12 +1,11 @@
-import importlib
 from time import sleep, monotonic
 from matplotlib import axis
 import numpy as np
 from neopixel_spi import RpiNeoPixelSPI
-from colors import ColorMode, PixelOrder, create_gamma_function, G
+from colors import ColorMode, PixelOrder, create_gamma_function, G, rgb_to_hsv, hsv_to_rgb, SOME_COLORS
 from every import Every # https://raw.githubusercontent.com/Hangover3832/every_timer/refs/heads/main/every.py
 from random import random, randint
-
+from effects import Fire, Meteor
 
 def class_test():
     # RpiNeoPixelSPI(8, pixel_order=PixelOrder.GRB)(0, 1.0) # setting the white LED an a non RGBW throws an exception
@@ -19,7 +18,7 @@ def class_test():
 
     with RpiNeoPixelSPI(60, color_mode=ColorMode.RGB, pixel_order=PixelOrder.GRBW, brightness=1, gamma_func=G.linear.value, max_power=10) as neo:
 
-        print("Virtual screens:")
+        print("Virtual screens")
         screen = neo.add_virtual_screen(np.array([[5, 7, 9], [18, 19, 20]]))
 
         # Put some colors on the virtual screen:
@@ -41,7 +40,7 @@ def class_test():
             print()
 
         neo.clear()
-        neo.set_value([10, 20, 50], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 50 to red
+        neo([10, 20, 50], (1.0, 0.0, 0.0, 0.0))() # Set pixels 10, 20 and 50 to red
         neo[30:40] = 0., 0., 1., 1. # set pixels 30..39 to blue on white
         neo *= np.array([1.0, 1.0, 1.0, 0.75]) # reduce all white LEDs brithness to 75%
         neo[45] = 1.0 # This sets only the white LED on a RGBW Neopixel
@@ -49,7 +48,6 @@ def class_test():
         neo[:10] = 0., 1., 1. # set first 10 pixels to aqua
         neo[-10:] = 1., 1., 0. # set last 10 pixels to yellow
         neo() # neo.show()
-        sleep(1)
 
         # alternative indexing
         i = np.array([5, 10, 15, 20])
@@ -57,66 +55,82 @@ def class_test():
 
         for _ in range(10):
             neo <<= 1 # left roll by 1, but not show() # type: ignore
-            sleep(0.1)
             (~neo)() # invert colors and show()
             neo *= 0.9 # multiply all led values with 0.9
         for _ in range(10):
             neo += np.array([0.0, 0.0, 0.0, 0.1]) # increase all white LEDs by 0.1
-            neo >>= 2 # right roll by 2 and show()
-            sleep(0.1)
+            neo >>= 2 # right roll by 2
+            neo()
 
-        neo.fill((1.0, 1.0, 1.0, 1.0))()
-        print(f" Power at {neo.power_consumption:.1f} W")
-        sleep(0.5)
-        neo *= 0.5
-        neo()
-        print(f" Power at {neo.power_consumption:.1f} W")
-        sleep(0.5)
-        neo *= 0.5
-        neo()
-        print(f" Power at {neo.power_consumption:.1f} W")
-        sleep(0.5)
+        neo.clear()()
 
-        print("full power")
-        neo[:] = (1., 1., 1., 1.)
-        neo().clear()
+
+    with RpiNeoPixelSPI(10, device=1, pixel_order=PixelOrder.GRBW) as neo:
+        
+        neo.clear()
+        neo[:] = 0.1 # add white pixel values
+
+        def read_and_write(cm: ColorMode):
+            print()
+            neo.color_mode = cm
+            v = (0.9, 0.45, 0.18)
+            print(f"Write value {v} in {cm.name}")
+            neo[0] = v
+            neo(1, v)
+            print(f"Read value: {neo[0]}")
+
+            print(f"Write values in {cm.name}:")
+            for i in range(neo.num_pixels):
+                v = i/neo.num_pixels, i/neo.num_pixels/2, i/neo.num_pixels/5
+                print(v)
+                neo[i] = v
+            
+            print(f"Read sliced values:\n {neo[:]}")
+
+            print()
+            neo()
+
+        for cm in ColorMode:
+            read_and_write(cm)
+
+
+        neo.color_mode = ColorMode.HSV
+        n = 5
+        v = np.array([[0.0, 1.0, 1.0]]) 
+        for i in range(1, n):
+            v = np.vstack((v, np.array([[i/n, 1.0, 1.0]])))
+
+        print(f"Array broadcast HSV rainbow:\n{v}")
+        neo[4] = v # broadcast somwhere
+        neo[0] = v # broadcast to index 0
+        neo[-1:-n-1:-1] = v # reversed broadcast from the end
+        # neo *= 0.1 # dim the stripe
+        neo()
+        # print all values HSV:
+        print(neo[:])
+
+        neo.clear()()
 
 
 def ColorModeTest():
-    """Color mode conversion test"""
-    with RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW) as neo:
-        r = np.array([1.,0.,0.])
-        g = np.array([0., 1., 0.])
-        b = np.array([0. ,0., 1.])
-        neo.color_mode = ColorMode.RGB
-        neo.next(r)
-        neo.next(g)
-        neo.next(b)
-        neo().color_mode = ColorMode.HSV
-        v1 = neo.color_mode.from_rgb(r)
-        v2 = neo.color_mode.from_rgb(g)
-        v3 = neo.color_mode.from_rgb(b)
-        print("R G & B in HVS", v1, v2, v3)
-        neo.next(v1)
-        neo.next(v2)
-        neo.next(v3)
-        neo().color_mode = ColorMode.HLS
-        v1 = neo.color_mode.from_rgb(r)
-        v2 = neo.color_mode.from_rgb(g)
-        v3 = neo.color_mode.from_rgb(b)
-        print("R G & B in HLS", v1, v2, v3)
-        neo.next(v1)
-        neo.next(v2)
-        neo.next(v3)
-        neo().color_mode = ColorMode.YIQ
-        v1 = neo.color_mode.from_rgb(r)
-        v2 = neo.color_mode.from_rgb(g)
-        v3 = neo.color_mode.from_rgb(b)
-        print("R G & B in YIQ", v1, v2, v3)
-        neo.next(v1)
-        neo.next(v2)
-        neo.next(v3)
-        neo().clear()
+    print("\nColor mode conversion tests:")
+
+    def run_test():
+
+        def process_mode(mode: ColorMode):
+            print(f"Mode {mode.name}:")
+
+            for i, (name, color) in enumerate(SOME_COLORS.items()):
+                color = color[:3]
+                v1 = ColorMode.RGB.convert_to(color, mode)
+                v2 = mode.convert_to(v1, ColorMode.RGB)
+                print(f"[{i}] RGB {color} to {mode.name}: {np.round(v1, 3)}")
+                print(f"[{i}] {mode.name}->RGB->{mode.name}:         {np.round(v2, 3)}")
+
+        for cm in ColorMode:
+            process_mode(cm)
+
+    run_test()
 
 
 def GammaTest() -> None:
@@ -146,7 +160,7 @@ def Rainbow(neo: RpiNeoPixelSPI):
 
     @Every.While(5, n=neo) # repeat for 5s
     def proceed(n:RpiNeoPixelSPI):
-        if drop()[0]:
+        if drop():
             n.roll(value=1.0) # drop a white pixel
         else:
             n.roll()
@@ -161,7 +175,7 @@ def Raindrops(neo: RpiNeoPixelSPI):
         # place a random colored pixel at a random location in a random interval
         index = randint(0, n.num_pixels-1) # random position
         hue = random() # a random color in HSV color space
-        n.set_value(index, (hue, 1.0, 1.0))
+        n(index, (hue, 1.0, 1.0))
         drop.interval = random()/5
 
     @Every.every(1.0)
@@ -169,7 +183,7 @@ def Raindrops(neo: RpiNeoPixelSPI):
         # place a white pixel at a random location every second
         index = randint(0, n.num_pixels-1) # random position
         value = random() # a random color in HSV color space
-        n.set_value(index, value)
+        n(index, value)
 
     @Every.While(30, n=neo) # repeat for 30s
     def proceed(n: RpiNeoPixelSPI):
@@ -181,6 +195,7 @@ def Raindrops(neo: RpiNeoPixelSPI):
 
 def light_show():
     with RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW) as neo:
+        neo.reversed = True
         while True:
             Rainbow(neo)
             Raindrops(neo)
@@ -196,34 +211,41 @@ def power_measure():
 
 
 def fire():
-    from effects import Fire
-
-    candle = Fire(
-        RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB, gamma_func=G.linear.value, brightness=0.2),
-        spectrum=(0.5, -0.1),
+    candle1 = Fire(
+        RpiNeoPixelSPI(23, device=0, pixel_order=PixelOrder.GRB, brightness=0.25),
+        spectrum=(0.8, 0.0),
         decay_factor=(0.95, 0.85),
-        spark_interval_factor=0.01,
-        spark_propagation_delay=0.01
+        spark_interval_factor=0.05,
+        spark_propagation_interval=0.01
         )
 
-    # Test temperature gradient and fire decay:
-    candle.ignite_spark.pause() # no ignition now
-    candle.show_temperature_gradient()
-    # let the gradient decay:
-    Every(2.5).do(candle.progress).do_while() # repeat for 2.5s
+    candle2 = Fire(
+        RpiNeoPixelSPI(23, device=1, pixel_order=PixelOrder.GRBW, brightness=1.0),
+        #spectrum=(1.0, 0.0),
+        #decay_factor=(0.95, 0.85),
+        #spark_interval_factor=0.15,
+        #spark_propagation_interval=0.01
+        )
 
-    # Let the candle burn:
-    candle.ignite_spark.resume()
+    # Let the candles burn:
     while True:
-        candle.progress()
+        candle1.progress()
+        #candle2.progress()
+
+
+def meteor_shower():
+    meteor = Meteor(RpiNeoPixelSPI(23, device=0, pixel_order=PixelOrder.GRB, brightness=1.0))
+    while True:
+        meteor.progress()
 
 
 if __name__ == "__main__":
-    RpiNeoPixelSPI(24, device=0, pixel_order=PixelOrder.GRB).clear()()
+    RpiNeoPixelSPI(23, device=0, pixel_order=PixelOrder.GRB).clear()()
     RpiNeoPixelSPI(150, device=1, pixel_order=PixelOrder.GRBW).clear()()
     #GammaTest()
-    #class_test()
-    #ColorModeTest()
+    class_test()
+    ColorModeTest()
     #power_measure()
     #light_show()
     fire()
+    meteor_shower()
